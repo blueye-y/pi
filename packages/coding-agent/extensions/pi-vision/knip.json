@@ -1,0 +1,14 @@
+{
+  "$schema": "https://unpkg.com/knip@5/schema.json",
+  "ignoreExportsUsedInFile": true,
+  "entry": [
+    "vision.ts"
+  ],
+  "project": [
+    "**/*.ts"
+  ],
+  "ignoreBinaries": [
+    "osascript",
+    "sips"
+  ]
+}
