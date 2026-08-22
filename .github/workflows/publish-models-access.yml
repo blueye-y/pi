@@ -1,0 +1,57 @@
+# Publish the pi-models-access package to npm when a release tag is pushed.
+#
+# Tag format: pi-models-access@<version> (e.g. pi-models-access@1.1.2).
+# Create it with:
+#   node scripts/release-models-access.mjs patch --commit
+#   git push <remote> <branch> --tags
+#
+# Authentication uses npm trusted publishing via OIDC (id-token: write):
+# configure the repository's OIDC trust in the npm account settings
+# (https://www.npmjs.com/settings/<user>/tokens -> "Create new token" ->
+# "Publish and access granular access tokens" -> "GitHub Actions CI/CD" ->
+# grant access to the blueye-y/pi repository). Alternatively, set an
+# NPM_TOKEN secret in the fork and uncomment the env block in the publish step.
+
+name: publish-models-access
+
+on:
+  push:
+    tags:
+      - "pi-models-access@*"
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Install dependencies
+        working-directory: packages/coding-agent/extensions/pi-models-access
+        run: npm install --ignore-scripts
+
+      - name: Build
+        working-directory: packages/coding-agent/extensions/pi-models-access
+        run: npm run build
+
+      - name: Publish to npm
+        working-directory: packages/coding-agent/extensions/pi-models-access
+        run: npm publish --provenance --access public
+        # For a token-based setup instead of OIDC trusted publishing, add:
+        # env:
+        #   NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        # and drop --provenance from the command above.

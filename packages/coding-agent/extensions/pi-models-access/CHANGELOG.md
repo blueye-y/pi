@@ -1,5 +1,7 @@
 # Changelog
 
+## [Unreleased]
+
 ## 1.1.1
 
 - **Package banner now GitHub-hosted**: `pi.image` points to `raw.githubusercontent.com/blueye-y/pi-models-access/main/banner.jpg` (own repo) instead of the old Supabase URL on the original author's bucket. New banner art in `banner.jpg`.
