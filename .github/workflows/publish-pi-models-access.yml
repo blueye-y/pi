@@ -2,7 +2,7 @@
 #
 # Tag format: pi-models-access@<version> (e.g. pi-models-access@1.1.2).
 # Create it with:
-#   node scripts/release-models-access.mjs patch --commit
+#   node scripts/release-pi-models-access.mjs patch --commit
 #   git push <remote> <branch> --tags
 #
 # Authentication uses npm trusted publishing via OIDC (id-token: write):
@@ -12,7 +12,7 @@
 # grant access to the blueye-y/pi repository). Alternatively, set an
 # NPM_TOKEN secret in the fork and uncomment the env block in the publish step.
 
-name: publish-models-access
+name: publish-pi-models-access
 
 on:
   push:
@@ -35,7 +35,8 @@ jobs:
           persist-credentials: false
 
       - name: Setup Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        # v7.0.0
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
           node-version: "22"
           registry-url: "https://registry.npmjs.org"
