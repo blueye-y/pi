@@ -1,0 +1,70 @@
+{
+  "name": "pi-models-access",
+  "version": "1.1.1",
+  "description": "Complete model providers for pi — Alibaba Model Studio (Plan subscription + Cloud pay-per-token, Anthropic + OpenAI + Responses API shapes, native thinking levels. Qwen 3.8/3.7/3.6, DeepSeek V4, Kimi K2.6/K2.7, GLM-5.1/5.2, MiniMax M2.5) and DeepSeek official API (Completions / Anthropic / Responses API modes, dynamic model list, balance query, vision).",
+  "author": "Francesco Frapporti <effedue@gmail.com>",
+  "license": "MIT",
+  "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/blueye-y/pi-models-access.git"
+  },
+  "homepage": "https://github.com/blueye-y/pi-models-access#readme",
+  "bugs": {
+    "url": "https://github.com/blueye-y/pi-models-access/issues"
+  },
+  "keywords": [
+    "pi-package",
+    "pi",
+    "pi-coding-agent",
+    "alibaba",
+    "model-studio",
+    "dashscope",
+    "deepseek",
+    "deepseek-api",
+    "qwen",
+    "qwen3",
+    "kimi",
+    "glm",
+    "minimax",
+    "responses-api",
+    "anthropic",
+    "openai",
+    "ai",
+    "llm",
+    "reasoning",
+    "thinking",
+    "vision"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "prepublishOnly": "npm run build"
+  },
+  "files": [
+    "extensions/**/*.ts",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
+  "pi": {
+    "extensions": [
+      "extensions/alibaba.ts",
+      "extensions/deepseek.ts"
+    ],
+    "image": "https://raw.githubusercontent.com/blueye-y/pi-models-access/main/banner.jpg"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*"
+  },
+  "peerDependenciesMeta": {
+    "@earendil-works/pi-coding-agent": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@earendil-works/pi-ai": "*",
+    "@earendil-works/pi-coding-agent": "*",
+    "@types/node": "22.19.19",
+    "typebox": "1.3.7",
+    "typescript": "5.9.3"
+}
