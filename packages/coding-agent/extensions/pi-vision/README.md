@@ -7,10 +7,10 @@
 _Describe images with a vision model you pick, then feed the text to models that can't see._
 
 [![pi extension](https://img.shields.io/badge/pi-extension-blueviolet)](https://github.com/earendil-works/pi-coding-agent)
-[![npm](https://img.shields.io/npm/v/pi-vision)](https://www.npmjs.com/package/pi-vision)
+[![npm](https://img.shields.io/npm/v/pi-vision-ext)](https://www.npmjs.com/package/pi-vision-ext)
 [![license](https://img.shields.io/badge/license-MIT-blue)](./LICENSE)
 
-<img src="https://raw.githubusercontent.com/monotykamary/pi-vision/main/assets/vision.jpg" alt="Vision Handoff picker — an interactive TUI listing every model, vision-capable ones marked with an eye, to choose the describer for text-only models" width="820">
+<img src="https://raw.githubusercontent.com/blueye-y/pi/extensions/packages/coding-agent/extensions/pi-vision/assets/vision-handoff.jpg" alt="Vision picker — an interactive TUI listing every model, vision-capable ones marked with an eye, to choose the describer for text-only models" width="820">
 
 </div>
 
@@ -369,7 +369,16 @@ pnpm lint:dead     # Dead code detection (knip)
 
 ## Acknowledgements
 
-The vision handoff concept and the exhaustive describer prompt originate from the [pi-umans-provider](https://github.com/monotykamary/pi-umans-provider) GLM 5.1 pipeline. The picker TUI builds on the patterns from [pi-hide-providers](https://github.com/monotykamary/pi-hide-providers), which in turn mirror pi core's built-in selectors.
+This extension is a **fork of [pi-vision-handoff](https://github.com/monotykamary/pi-vision-handoff) by [Tom X Nguyen](https://github.com/monotykamary)**. We forked it and extended it with:
+
+- marker-based clipboard paste (integrated from [@pi-archimedes/image-paste](https://www.npmjs.com/package/@pi-archimedes/image-paste)),
+- an HTML-clipboard image reader (Feishu docs & WebKit apps: `data-ace-gallery-json` / signed `<img src>` download URLs),
+- a macOS osascript/JXA clipboard reader (NSPasteboard, TIFF→PNG via `sips`),
+- an editor-intercepted paste key (no pi "Extension shortcut conflict" warning),
+- the `/vision paste` command and automatic reload on toggle,
+- and the rename from `pi-vision-handoff` to `pi-vision`.
+
+The original vision-handoff concept and the exhaustive describer prompt originate from the [pi-umans-provider](https://github.com/monotykamary/pi-umans-provider) GLM 5.1 pipeline. The picker TUI builds on the patterns from [pi-hide-providers](https://github.com/monotykamary/pi-hide-providers), which in turn mirror pi core's built-in selectors.
 
 ## License
 

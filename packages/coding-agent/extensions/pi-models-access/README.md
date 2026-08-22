@@ -2,6 +2,10 @@
 
 The complete [`pi`](https://github.com/badlogic/pi-mono) extension set for Alibaba's model lineup — **Qwen 3.8 Max**, **Qwen 3.7 Max / Plus / Flash**, **Qwen 3.6 Plus / Flash**, **DeepSeek V4 Pro / Flash**, **Kimi K2.6 / K2.7**, **GLM-5.1 / 5.2**, **MiniMax M2.5**, and the rest of the catalog — **plus the official DeepSeek API provider** (Completions / Anthropic / Responses API modes, dynamic model list, balance query, image understanding). Native thinking-level support, both Anthropic- and OpenAI-shaped APIs (including the new OpenAI **Responses** API), International / China / US / Japan / Frankfurt endpoints, both Coding Plan subscriptions and pay-per-token Cloud keys.
 
+## Origin
+
+This extension is a **fork and extension of [pi-alibaba-models](https://www.npmjs.com/package/pi-alibaba-models) by [Francesco Frapporti](https://fornace.it) at [Fornace](https://fornace.it)** (the author field and the "From the same author" section below reflect the original work). We forked it and extended it with the **official DeepSeek API provider** (Completions / Anthropic / Responses API modes, dynamic model list, balance query, image understanding), the OpenAI **Responses** API shape for the Cloud provider, and renamed the package to `pi-models-access`.
+
 ## Features
 
 - **Alibaba providers**: subscription-based Model Studio Coding Plan **and** pay-per-token Alibaba Cloud (DashScope) — registered side by side, switch per chat from the model picker.
