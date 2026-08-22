@@ -8,6 +8,7 @@
 
 ### Changed
 
+- Changed the Node.js distribution to load a bundled runtime and made legacy emitted module paths re-export its bindings, reducing startup filesystem reads without creating duplicate coding-agent module instances.
 - Changed session sharing to render clickable terminal links and Radius shares to display only the artifact's canonical URL.
 
 ### Fixed

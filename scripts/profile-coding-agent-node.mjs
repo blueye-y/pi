@@ -9,6 +9,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(__dirname, "..");
 const packageDir = join(repoRoot, "packages", "coding-agent");
 const distCliPath = join(packageDir, "dist", "cli.js");
+const bundledDistCliPath = join(packageDir, "dist", "bundle", "cli.js");
 const srcCliPath = join(packageDir, "src", "cli.ts");
 const defaultNodeProfileDir = join(repoRoot, "profiles-node");
 const defaultBunProfileDir = join(repoRoot, "profiles-bun");
@@ -35,8 +36,9 @@ Options:
   --runtime <name>       node, bun, or auto (default: auto)
   --agent-dir <dir>      Use a specific PI_CODING_AGENT_DIR for the benchmark run
   --isolated-agent-dir   Use a fresh temporary agent dir instead of the normal one
+  --bundle               Profile the bundled Node entrypoint instead of dist/cli.js
   --no-offline           Do not force PI_OFFLINE=1 / PI_SKIP_VERSION_CHECK=1
-  --skip-build           Reuse the current dist/cli.js without rebuilding first (Node only)
+  --skip-build           Reuse the current build output without rebuilding first (Node only)
   --cpu-profile          Write CPU profiles for benchmark runs
   --help                 Show this help
 
@@ -73,6 +75,7 @@ function parseMode(value) {
 function parseArgs(argv) {
 	const options = {
 		mode: "tui",
+		bundle: false,
 		runs: 1,
 		warmup: 0,
 		profileDir: undefined,
@@ -100,6 +103,11 @@ function parseArgs(argv) {
 
 		if (arg === "--isolated-agent-dir") {
 			options.isolatedAgentDir = true;
+			continue;
+		}
+
+		if (arg === "--bundle") {
+			options.bundle = true;
 			continue;
 		}
 
@@ -221,7 +229,7 @@ function parseStartupTimings(stderr) {
 	let inBlock = false;
 
 	for (const line of lines) {
-		if (line.includes("--- Startup Timings ---")) {
+		if (/^--- Startup Timings(?:: [^-]+)? ---$/.test(line.trim())) {
 			inBlock = true;
 			continue;
 		}
@@ -279,7 +287,9 @@ async function waitForExit(child, errorPrefix) {
 }
 
 async function runBuild() {
-	process.stdout.write("Building packages/tui, packages/telemetry, packages/ai, packages/agent, and packages/coding-agent...\n");
+	process.stdout.write(
+		"Building packages/tui, packages/telemetry, packages/ai, packages/agent, packages/protocol, packages/client, and packages/coding-agent...\n",
+	);
 	const startedAt = performance.now();
 	const child = spawn(
 		"npm",
@@ -294,6 +304,10 @@ async function runBuild() {
 			"packages/ai",
 			"--workspace",
 			"packages/agent",
+			"--workspace",
+			"packages/protocol",
+			"--workspace",
+			"packages/client",
 			"--workspace",
 			"packages/coding-agent",
 		],
@@ -330,7 +344,7 @@ async function runBuild() {
 	process.stdout.write(`Build completed in ${formatMs(performance.now() - startedAt)}\n`);
 }
 
-function getRuntimeCommand(runtime, mode, profileDir, profileName, cpuProfile) {
+function getRuntimeCommand(runtime, mode, profileDir, profileName, cpuProfile, nodeEntryPath) {
 	const benchmarkArgs = ["--no-session"];
 	if (mode === "rpc") {
 		benchmarkArgs.push("--mode", "rpc");
@@ -352,7 +366,7 @@ function getRuntimeCommand(runtime, mode, profileDir, profileName, cpuProfile) {
 	if (cpuProfile) {
 		args.push("--cpu-prof", `--cpu-prof-dir=${profileDir}`, `--cpu-prof-name=${profileName}`);
 	}
-	args.push(distCliPath, ...benchmarkArgs);
+	args.push(nodeEntryPath, ...benchmarkArgs);
 	return {
 		executable: process.execPath,
 		args,
@@ -360,7 +374,7 @@ function getRuntimeCommand(runtime, mode, profileDir, profileName, cpuProfile) {
 }
 
 function createBenchmarkEnv(options, isolatedAgentDir) {
-	const env = { ...process.env };
+	const env = { ...process.env, PI_TIMING: "1" };
 	if (options.agentDir) {
 		env[agentDirEnvName] = options.agentDir;
 	} else if (isolatedAgentDir) {
@@ -386,11 +400,12 @@ async function runTuiBenchmarkRun({ runtime, runIndex, measuredIndex, options, p
 		mkdirSync(isolatedAgentDir, { recursive: true });
 	}
 
-	const command = getRuntimeCommand(runtime, "tui", profileDir, profileName, options.cpuProfile);
+	const nodeEntryPath = options.bundle ? bundledDistCliPath : distCliPath;
+	const command = getRuntimeCommand(runtime, "tui", profileDir, profileName, options.cpuProfile, nodeEntryPath);
 	const child = spawn(command.executable, command.args, {
 		cwd: packageDir,
 		env: createBenchmarkEnv(options, isolatedAgentDir),
-		stdio: ["inherit", "ignore", "pipe"],
+		stdio: ["inherit", "inherit", "pipe"],
 		shell: process.platform === "win32" && runtime === "bun",
 	});
 
@@ -445,7 +460,8 @@ async function runRpcBenchmarkRun({ runtime, runIndex, measuredIndex, options, p
 		mkdirSync(isolatedAgentDir, { recursive: true });
 	}
 
-	const command = getRuntimeCommand(runtime, "rpc", profileDir, profileName, options.cpuProfile);
+	const nodeEntryPath = options.bundle ? bundledDistCliPath : distCliPath;
+	const command = getRuntimeCommand(runtime, "rpc", profileDir, profileName, options.cpuProfile, nodeEntryPath);
 	const child = spawn(command.executable, command.args, {
 		cwd: packageDir,
 		env: createBenchmarkEnv(options, isolatedAgentDir),
@@ -547,6 +563,9 @@ async function main() {
 	}
 
 	const runtime = resolveRuntime(options.runtime);
+	if (options.bundle && runtime !== "node") {
+		throw new Error("--bundle only supports the Node runtime");
+	}
 	options.label = resolveLabel(options.mode, options.label);
 	const profileDir = resolveProfileDir(runtime, options.profileDir);
 
@@ -559,7 +578,7 @@ async function main() {
 		);
 	}
 
-	const entryPath = runtime === "bun" ? srcCliPath : distCliPath;
+	const entryPath = runtime === "bun" ? srcCliPath : options.bundle ? bundledDistCliPath : distCliPath;
 	if (!existsSync(entryPath)) {
 		throw new Error(`CLI entrypoint not found: ${entryPath}`);
 	}
@@ -597,7 +616,7 @@ async function main() {
 	const maxElapsedRun = measuredRuns.reduce((slowest, run) => (run.elapsedMs > slowest.elapsedMs ? run : slowest));
 	if (measuredRuns.length === 1) {
 		process.stdout.write("\nResult\n");
-		process.stdout.write(`  runtime:          ${runtime}\n`);
+		process.stdout.write(`  runtime:          ${runtime}${options.bundle ? " (bundle)" : ""}\n`);
 		process.stdout.write(`  mode:             ${options.mode}\n`);
 		process.stdout.write(`  elapsed:          ${formatMs(measuredRuns[0].elapsedMs)}\n`);
 		for (const [label, summary] of timingSummaries.entries()) {
@@ -615,7 +634,7 @@ async function main() {
 	}
 
 	process.stdout.write("\nSummary\n");
-	process.stdout.write(`  runtime:          ${runtime}\n`);
+	process.stdout.write(`  runtime:          ${runtime}${options.bundle ? " (bundle)" : ""}\n`);
 	process.stdout.write(`  mode:             ${options.mode}\n`);
 	process.stdout.write(`  elapsed min:      ${formatMs(elapsedSummary.min)}\n`);
 	process.stdout.write(`  elapsed median:   ${formatMs(elapsedSummary.median)}\n`);
