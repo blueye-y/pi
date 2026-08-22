@@ -40,14 +40,8 @@ jobs:
           node-version: "22"
           registry-url: "https://registry.npmjs.org"
 
-      - name: Install dependencies
-        working-directory: packages/coding-agent/extensions/pi-vision
-        run: npm install --ignore-scripts --no-workspaces
-
-      - name: Typecheck
-        working-directory: packages/coding-agent/extensions/pi-vision
-        run: npm run typecheck
-
+      # No dependency install needed: the package ships TypeScript sources
+      # (pi loads them via jiti), so npm publish packs the `files` directly.
       - name: Publish to npm
         working-directory: packages/coding-agent/extensions/pi-vision
         run: npm publish --provenance --access public
