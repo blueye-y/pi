@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
@@ -36,9 +36,9 @@ Options:
   --runtime <name>       node, bun, or auto (default: auto)
   --agent-dir <dir>      Use a specific PI_CODING_AGENT_DIR for the benchmark run
   --isolated-agent-dir   Use a fresh temporary agent dir instead of the normal one
-  --bundle               Profile the bundled Node entrypoint instead of dist/cli.js
+  --bundle               Build and profile the bundled Node entrypoint instead of dist/cli.js
   --no-offline           Do not force PI_OFFLINE=1 / PI_SKIP_VERSION_CHECK=1
-  --skip-build           Reuse the current build output without rebuilding first (Node only)
+  --skip-build           Reuse the selected build output without rebuilding first (Node only)
   --cpu-profile          Write CPU profiles for benchmark runs
   --help                 Show this help
 
@@ -286,59 +286,66 @@ async function waitForExit(child, errorPrefix) {
 	});
 }
 
-async function runBuild() {
+async function runBuild(bundle) {
 	process.stdout.write(
-		"Building packages/tui, packages/telemetry, packages/ai, packages/agent, packages/protocol, packages/client, and packages/coding-agent...\n",
+		`Building dependencies and the ${bundle ? "bundled" : "unbundled"} coding-agent Node entrypoint...\n`,
 	);
 	const startedAt = performance.now();
-	const child = spawn(
-		"npm",
-		[
-			"run",
-			"build",
-			"--workspace",
-			"packages/tui",
-			"--workspace",
-			"packages/telemetry",
-			"--workspace",
-			"packages/ai",
-			"--workspace",
-			"packages/agent",
-			"--workspace",
-			"packages/protocol",
-			"--workspace",
-			"packages/client",
-			"--workspace",
-			"packages/coding-agent",
-		],
+	const commands = [
 		{
+			label: "Dependency build",
+			args: [
+				"run",
+				"build",
+				"--workspace",
+				"packages/tui",
+				"--workspace",
+				"packages/telemetry",
+				"--workspace",
+				"packages/ai",
+				"--workspace",
+				"packages/agent",
+				"--workspace",
+				"packages/protocol",
+				"--workspace",
+				"packages/client",
+			],
+		},
+		{
+			label: "Coding-agent build",
+			args: ["run", bundle ? "build" : "build:unbundled", "--workspace", "packages/coding-agent"],
+		},
+	];
+
+	for (const command of commands) {
+		const child = spawn("npm", command.args, {
 			cwd: repoRoot,
 			env: process.env,
 			stdio: ["ignore", "pipe", "pipe"],
 			shell: process.platform === "win32",
-		},
-	);
+		});
 
-	let stdout = "";
-	let stderr = "";
-	child.stdout.setEncoding("utf8");
-	child.stdout.on("data", (chunk) => {
-		stdout += chunk;
-	});
-	child.stderr.setEncoding("utf8");
-	child.stderr.on("data", (chunk) => {
-		stderr += chunk;
-	});
+		let stdout = "";
+		let stderr = "";
+		child.stdout.setEncoding("utf8");
+		child.stdout.on("data", (chunk) => {
+			stdout += chunk;
+		});
+		child.stderr.setEncoding("utf8");
+		child.stderr.on("data", (chunk) => {
+			stderr += chunk;
+		});
 
-	const exitCode = await waitForExit(child, "Build");
-	if (exitCode !== 0) {
-		if (stdout.trim()) {
-			process.stdout.write(`${stdout}${stdout.endsWith("\n") ? "" : "\n"}`);
+		const exitCode = await waitForExit(child, command.label);
+		if (exitCode !== 0) {
+			if (stdout.trim()) {
+				process.stdout.write(`${stdout}${stdout.endsWith("\n") ? "" : "\n"}`);
+			}
+			if (stderr.trim()) {
+				process.stderr.write(`${stderr}${stderr.endsWith("\n") ? "" : "\n"}`);
+			}
+			throw new Error(`${command.label} failed with exit code ${exitCode}`);
 		}
-		if (stderr.trim()) {
-			process.stderr.write(`${stderr}${stderr.endsWith("\n") ? "" : "\n"}`);
-		}
-		throw new Error(`Build failed with exit code ${exitCode}`);
 	}
 
 	process.stdout.write(`Build completed in ${formatMs(performance.now() - startedAt)}\n`);
@@ -570,7 +577,7 @@ async function main() {
 	const profileDir = resolveProfileDir(runtime, options.profileDir);
 
 	if (runtime === "node" && options.build) {
-		await runBuild();
+		await runBuild(options.bundle);
 	}
 	if (runtime === "bun") {
 		process.stdout.write(
@@ -579,6 +586,15 @@ async function main() {
 	}
 
 	const entryPath = runtime === "bun" ? srcCliPath : options.bundle ? bundledDistCliPath : distCliPath;
+	if (
+		runtime === "node" &&
+		!options.bundle &&
+		!options.build &&
+		existsSync(distCliPath) &&
+		readFileSync(distCliPath, "utf8").includes('import "./bundle/cli.js";')
+	) {
+		throw new Error("dist/cli.js is a bundled facade; rerun without --skip-build for an unbundled profile");
+	}
 	if (!existsSync(entryPath)) {
 		throw new Error(`CLI entrypoint not found: ${entryPath}`);
 	}

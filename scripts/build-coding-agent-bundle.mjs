@@ -10,7 +10,7 @@ import {
 	rmSync,
 	writeFileSync,
 } from "node:fs";
-import { builtinModules } from "node:module";
+import { isBuiltin } from "node:module";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { build, transform } from "esbuild";
@@ -64,17 +64,12 @@ function commonBuildOptions() {
 	};
 }
 
-function isBuiltinModule(specifier) {
-	const normalized = specifier.startsWith("node:") ? specifier.slice(5) : specifier;
-	return builtinModules.includes(specifier) || builtinModules.includes(normalized);
-}
-
 function validateExternalImports(metafiles) {
 	const unexpected = new Set();
 	for (const metafile of metafiles) {
 		for (const input of Object.values(metafile.inputs)) {
 			for (const imported of input.imports) {
-				if (!imported.external || isBuiltinModule(imported.path) || allowedExternalPackages.has(imported.path)) {
+				if (!imported.external || isBuiltin(imported.path) || allowedExternalPackages.has(imported.path)) {
 					continue;
 				}
 				unexpected.add(imported.path);
