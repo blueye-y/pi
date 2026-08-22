@@ -1,5 +1,5 @@
 {
-  "name": "pi-vision",
+  "name": "pi-vision-ext",
   "version": "0.9.8",
   "description": "Give text-only pi models vision \u2014 describe images with a vision model you pick via an interactive picker, then hand off the text description to non-vision models. Includes direct clipboard paste (image-paste integration).",
   "type": "module",

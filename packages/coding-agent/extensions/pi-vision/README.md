@@ -134,7 +134,7 @@ pi install .   # from the extension directory (loads by path — edits apply on 
 **From npm** (this package):
 
 ```bash
-pi install npm:pi-vision
+pi install npm:pi-vision-ext
 ```
 
 > Upstream note: this extension started as `pi-vision-handoff` (with the older
