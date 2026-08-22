@@ -7,7 +7,7 @@
 _Describe images with a vision model you pick, then feed the text to models that can't see._
 
 [![pi extension](https://img.shields.io/badge/pi-extension-blueviolet)](https://github.com/earendil-works/pi-coding-agent)
-[![npm](https://img.shields.io/npm/v/pi-vision-ext)](https://www.npmjs.com/package/pi-vision-ext)
+[![npm](https://img.shields.io/npm/v/pi-vision)](https://www.npmjs.com/package/pi-vision)
 [![license](https://img.shields.io/badge/license-MIT-blue)](./LICENSE)
 
 <img src="https://raw.githubusercontent.com/blueye-y/pi/extensions/packages/coding-agent/extensions/pi-vision/assets/vision-handoff.jpg" alt="Vision picker — an interactive TUI listing every model, vision-capable ones marked with an eye, to choose the describer for text-only models" width="820">
@@ -134,7 +134,7 @@ pi install .   # from the extension directory (loads by path — edits apply on 
 **From npm** (this package):
 
 ```bash
-pi install npm:pi-vision-ext
+pi install npm:pi-vision
 ```
 
 > Upstream note: this extension started as `pi-vision-handoff` (with the older

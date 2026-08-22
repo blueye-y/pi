@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * Release script for the pi-vision extension package
- * (packages/coding-agent/extensions/pi-vision, published as pi-vision-ext).
+ * (packages/coding-agent/extensions/pi-vision).
  *
  * The package keeps an independent version line, decoupled from pi's lockstep
  * release process: scripts/release.mjs only touches the npm workspace
@@ -25,7 +25,7 @@
  * 8. Validate the tarball with npm pack --dry-run
  * 9. Publish with npm publish
  * 10. With --commit: commit the version/changelog changes and tag
- *     pi-vision-ext@<version>. Push the tag manually to trigger the
+ *     pi-vision@<version>. Push the tag manually to trigger the
  *     publish-pi-vision GitHub Actions workflow (OIDC trusted publishing).
  */
 
@@ -190,8 +190,8 @@ if (COMMIT) {
 	console.log("Committing and tagging...");
 	run(`git add ${PACKAGE_JSON} ${CHANGELOG}`);
 	run(`git commit -m "chore(pi-vision): release v${version}"`);
-	run(`git tag pi-vision-ext@${version}`);
-	console.log(`  Tagged pi-vision-ext@${version}`);
+	run(`git tag pi-vision@${version}`);
+	console.log(`  Tagged pi-vision@${version}`);
 	console.log("  Push the tag to trigger the publish-pi-vision workflow:");
 	console.log(`  git push <remote> ${gitBranch()} --tags`);
 }

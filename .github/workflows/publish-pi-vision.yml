@@ -1,7 +1,7 @@
 # Publish the pi-vision extension package to npm when a release tag is pushed.
 #
-# Tag format: pi-vision-ext@<version> (e.g. pi-vision-ext@0.9.8).
-#   git tag pi-vision-ext@0.9.8
+# Tag format: pi-vision@<version> (e.g. pi-vision@0.9.8).
+#   git tag pi-vision@0.9.8
 #   git push <remote> <branch> --tags
 #
 # Authentication uses npm trusted publishing via OIDC (id-token: write):
@@ -16,7 +16,7 @@ name: publish-pi-vision
 on:
   push:
     tags:
-      - "pi-vision-ext@*"
+      - "pi-vision@*"
 
 permissions:
   contents: read
