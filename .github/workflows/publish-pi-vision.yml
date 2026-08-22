@@ -1,6 +1,6 @@
 # Publish the pi-vision extension package to npm when a release tag is pushed.
 #
-# Tag format: pi-vision-ext@<version> (e.g. pi-vision-ext@0.9.8). Create it with:
+# Tag format: pi-vision-ext@<version> (e.g. pi-vision-ext@0.9.8).
 #   git tag pi-vision-ext@0.9.8
 #   git push <remote> <branch> --tags
 #
