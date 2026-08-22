@@ -163,7 +163,7 @@ console.log(`  CHANGELOG.md: [Unreleased] -> [${version}] - ${date}, fresh [Unre
 // 6. Install dependencies if needed, then build
 if (!existsSync(join(PACKAGE_DIR, "node_modules"))) {
 	console.log("Installing dependencies (no node_modules present)...");
-	run("npm install --ignore-scripts", { cwd: PACKAGE_DIR });
+	run("npm install --ignore-scripts --no-workspaces", { cwd: PACKAGE_DIR });
 	console.log();
 }
 console.log("Building (tsc)...");
