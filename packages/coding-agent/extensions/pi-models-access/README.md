@@ -16,7 +16,7 @@ This extension is a **fork and extension of [pi-alibaba-models](https://www.npmj
 - **Native Reasoning**: First-class thinking-level support for every reasoning-capable model, including `reasoning_effort` levels (Qwen 3.8 Max: low/medium/xhigh; DeepSeek V4, GLM 5.x: high/max) on the OpenAI path.
 - **Vision Capable**: Image input automatically enabled for VL models, Qwen 3.8 Max, and Qwen 3.x Plus variants.
 - **Live Catalog**: Pulls the real `/v1/models` from DashScope on every login + the canonical Qwen-Code plan template. New models appear as Alibaba ships them — no extension update needed. The Cloud catalog now uses Alibaba's native `GET /api/v1/models` (real context windows, max output tokens, Reasoning/VU capability tags, input modality and **pricing** — no more id-based guessing where available), falling back to the compatible-mode endpoint on domains that don't expose it.
-- **Footer status lines**: DeepSeek shows your account balance in the footer (`DS ¥12.34`, refreshed on a timer — toggle with `/deepseek → Balance in status bar`); Alibaba Cloud shows the active model's rate-limit quota when the limits endpoint is reachable (Beijing workspace domain).
+- **Footer status lines**: DeepSeek shows your account balance in the footer (`DS ¥12.34`, refreshed after each completed conversation round and on a 15-minute timer — toggle with `/deepseek → Balance in status bar`); Alibaba Cloud shows the active model's rate-limit quota when the limits endpoint is reachable (Beijing workspace domain).
 ## How to Use (Quickstart)
 
 1. **Install** the extension (see below).
@@ -205,7 +205,8 @@ full capability surface:
   with an offline cache fallback (`~/.pi/agent/deepseek-models.cache.json`).
 - **Balance query** — `GET /user/balance` via `/deepseek → Balance` or the `deepseek_balance` tool
 	  (`is_available` + per-currency total/granted/topped-up balances, CNY/USD), plus a **footer
-	  balance line** (`DS ¥12.34`) refreshed on a 15-minute timer (`/deepseek → Balance in status bar — toggle`).
+	  balance line** (`DS ¥12.34`) refreshed after each completed conversation round and on a
+	  15-minute timer (`/deepseek → Balance in status bar — toggle`).
 - **Price sync** — model costs are parsed from the official pricing page
 	  ([api-docs.deepseek.com/quick_start/pricing](https://api-docs.deepseek.com/quick_start/pricing))
 	  once per extension load, caching both **peak and off-peak** USD rates

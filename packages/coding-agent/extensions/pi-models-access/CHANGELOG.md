@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+- **Fresher footer balance** (`/deepseek`): the balance line now also refreshes after each
+  completed conversation round (`agent_settled` — once per user message, after the last turn
+  and once no retry/compaction is pending), so the footer number tracks actual spend
+  immediately instead of waiting for the next 15-minute timer tick. The timer stays as a
+  fallback for idle time.
+
 ## [1.1.2] - 2026-08-23
 
 - **Price sync from the official pricing page** (`extensions/deepseek.ts`): model costs are parsed from [api-docs.deepseek.com/quick_start/pricing](https://api-docs.deepseek.com/quick_start/pricing) once per extension load (startup and `/reload`), replacing the stale models.dev values (those hadn't been updated since the V4 launch). Both **peak and off-peak** USD rates are cached (`~/.pi/agent/deepseek-prices.cache.json`) and the active set follows the UTC clock — peak is weekdays 01:00-04:00 + 06:00-10:00 UTC, exactly 2× off-peak. The provider re-registers at each boundary via a precise `setTimeout` scheduler, so the footer `$` cost stays accurate across the day; offline it falls back to cache, then to a built-in table.

@@ -1129,6 +1129,15 @@ export default async function (pi: ExtensionAPI) {
 		startBalanceStatusTimer(() => { void updateBalanceStatus(); });
 	});
 
+	// ── Refresh the footer balance after each completed conversation round ─
+	// agent_settled fires once per agent run — after the last turn and once no
+	// retry/compaction is pending — so this is one balance GET per user message,
+	// not one per internal tool-loop turn. The 15-minute timer stays as a fallback
+	// for idle time (e.g. top-ups while the session is just sitting there).
+	pi.on("agent_settled", () => {
+		void updateBalanceStatus();
+	});
+
 	// ── Stop the timers when the session shuts down ─────────────────────
 	pi.on("session_shutdown", () => {
 		stopBalanceStatusTimer();
@@ -1214,7 +1223,7 @@ export default async function (pi: ExtensionAPI) {
 						`Models: ${modelIds.length} (${state})`,
 						`Vision: ${c.showVisionModel === false ? "hidden" : "on (deepseek-v4-flash-vision-exp)"}`,
 						`Price:  ${Object.keys(syncedPrices).length} models synced from official pricing page (${activePricePeriod === "offPeak" ? "off-peak" : "peak"} now) / built-in fallback`,
-						`Status: ${c.showBalanceInStatus === false ? "balance line off" : "balance line on (refresh 15m)"}`,
+						`Status: ${c.showBalanceInStatus === false ? "balance line off" : "balance line on (refresh 15m + after each run)"}`,
 					].join("\n"),
 					"info",
 				);
