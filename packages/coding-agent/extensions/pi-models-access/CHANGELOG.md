@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [1.1.2] - 2026-08-23
+
 - **Price sync from the official pricing page** (`extensions/deepseek.ts`): model costs are parsed from [api-docs.deepseek.com/quick_start/pricing](https://api-docs.deepseek.com/quick_start/pricing) once per extension load (startup and `/reload`), replacing the stale models.dev values (those hadn't been updated since the V4 launch). Both **peak and off-peak** USD rates are cached (`~/.pi/agent/deepseek-prices.cache.json`) and the active set follows the UTC clock — peak is weekdays 01:00-04:00 + 06:00-10:00 UTC, exactly 2× off-peak. The provider re-registers at each boundary via a precise `setTimeout` scheduler, so the footer `$` cost stays accurate across the day; offline it falls back to cache, then to a built-in table.
 - **Footer balance line** (`/deepseek`): the account balance now shows in the footer (`DS ¥12.34`, CNY/USD symbol per currency) — refreshed on `session_start` and every 15 minutes, plus right after `/deepseek → Balance`. Toggle with `/deepseek → Balance in status bar — toggle` (`showBalanceInStatus` in `deepseek-config.json`, default on); cleared when there's no key, the fetch fails, or the session ends.
 - **Alibaba Cloud footer quota** (`/alibaba`): when the active model is from `alibaba-cloud` and the limits endpoint is reachable (Beijing workspace domain), the footer shows its rate limit (`Ali qwen3.7-max 60 req/min`), refreshed on a 15-minute timer and on model switches. Toggle with `/alibaba → Status in footer — toggle` (`showStatusInFooter` in `alibaba-config.json`, default on).
