@@ -39,7 +39,7 @@ import {
 	type ToolResultMessage,
 	type UserMessage,
 } from "@earendil-works/pi-ai";
-import type { ExtensionAPI, ExtensionCommandContext, ProviderModelConfig } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionCommandContext, ExtensionUIContext, ProviderModelConfig } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 
 // ── Paths ─────────────────────────────────────────────────────────────
@@ -47,6 +47,15 @@ const HOME_DIR = path.join(os.homedir(), ".pi", "agent");
 const CONFIG_PATH = path.join(HOME_DIR, "deepseek-config.json");
 const AUTH_PATH = path.join(HOME_DIR, "auth.json");
 const MODELS_CACHE_PATH = path.join(HOME_DIR, "deepseek-models.cache.json");
+const PRICES_CACHE_PATH = path.join(HOME_DIR, "deepseek-prices.cache.json");
+
+// ── Price sync source (official pricing page, USD per 1M tokens) ─────
+// DeepSeek's official /models does not return pricing, so costs are parsed
+// from the official pricing docs (English page — USD, matching pi's $ cost
+// display). Off-peak rates are used: pi's cost model has no time-of-day
+// dimension, and off-peak covers most request hours (peak is Mon-Fri
+// 01:00-04:00 + 06:00-10:00 UTC only).
+const PRICING_URL = "https://api-docs.deepseek.com/quick_start/pricing";
 
 // ── Official endpoints (api-docs.deepseek.com/zh-cn) ──────────────────
 const BASE_URL = "https://api.deepseek.com"; // OpenAI-compatible (chat/completions + /responses)
@@ -68,40 +77,70 @@ interface DeepSeekConfig {
 	anthropicBaseUrl?: string;
 	/** Include the experimental vision model (deepseek-v4-flash-vision-exp) in the list. Default: true. */
 	showVisionModel?: boolean;
+	/** Show the account balance in the footer status line. Default: true. */
+	showBalanceInStatus?: boolean;
 	/** Override the context-window shown on a model's card, keyed by model id; "*" = all. */
 	contextWindowOverrides?: Record<string, number>;
 }
 
 // ── Official model catalog ────────────────────────────────────────────
-// Costs are the documented prices in CNY per million tokens (off-peak
-// 空闲时段 rates): input (cache miss) / output / input (cache hit).
+// ── Official model catalog (offline fallback) ────────────────────────
+// USD per 1M tokens from the official docs, both periods (peak = 2× off-peak
+// on weekdays UTC 01:00-04:00 + 06:00-10:00). Only used when the pricing
+// page sync above fails and no cached prices exist.
+type ModelRates = { input: number; output: number; cacheRead: number; cacheWrite: number };
+
+interface PeriodCosts {
+	offPeak: ModelRates;
+	peak: ModelRates;
+}
+
 interface KnownModelDef {
 	id: string;
 	name: string;
 	vision?: boolean;
-	cost: { input: number; output: number; cacheRead: number; cacheWrite: number };
+	cost: PeriodCosts;
 }
 
 const KNOWN_MODELS: KnownModelDef[] = [
 	{
 		id: "deepseek-v4-flash",
 		name: "DeepSeek V4 Flash",
-		cost: { input: 1.5, output: 4.5, cacheRead: 0.05, cacheWrite: 0 },
+		cost: {
+			offPeak: { input: 0.22, output: 0.66, cacheRead: 0.007, cacheWrite: 0 },
+			peak: { input: 0.44, output: 1.32, cacheRead: 0.014, cacheWrite: 0 },
+		},
 	},
 	{
 		id: "deepseek-v4-pro",
 		name: "DeepSeek V4 Pro",
-		cost: { input: 4.5, output: 13.5, cacheRead: 0.15, cacheWrite: 0 },
+		cost: {
+			offPeak: { input: 0.66, output: 1.98, cacheRead: 0.022, cacheWrite: 0 },
+			peak: { input: 1.32, output: 3.96, cacheRead: 0.044, cacheWrite: 0 },
+		},
 	},
 	{
 		id: "deepseek-v4-flash-vision-exp",
 		name: "DeepSeek V4 Flash Vision (exp)",
 		vision: true,
-		cost: { input: 1.5, output: 4.5, cacheRead: 0.05, cacheWrite: 0 },
+		cost: {
+			offPeak: { input: 0.22, output: 0.66, cacheRead: 0.007, cacheWrite: 0 },
+			peak: { input: 0.44, output: 1.32, cacheRead: 0.014, cacheWrite: 0 },
+		},
 	},
 ];
 
 const DEFAULT_COST = KNOWN_MODELS[0].cost;
+
+// ── Peak/off-peak period (official docs: peak = weekdays 01:00-04:00 +
+// 06:00-10:00 UTC; all other hours off-peak) ─────────────────────────
+function currentDeepSeekPeriod(): "peak" | "offPeak" {
+	const now = new Date();
+	const day = now.getUTCDay(); // 0=Sun..6=Sat
+	if (day === 0 || day === 6) return "offPeak";
+	const h = now.getUTCHours();
+	return (h >= 1 && h < 4) || (h >= 6 && h < 10) ? "peak" : "offPeak";
+}
 
 // ── Thinking level maps ───────────────────────────────────────────────
 // Official effort mapping table (deepseek-v4-flash 与 deepseek-v4-pro 一致):
@@ -257,6 +296,186 @@ function formatBalance(b: BalanceResponse): string {
 	return lines.join("\n");
 }
 
+// ── Price sync (official pricing page, USD per 1M tokens) ────────────
+// Runs once per extension load (pi startup and /reload). Official /models
+// does not return pricing, so costs are parsed from the official pricing
+// docs (English page). Both peak and off-peak rate sets are kept; the
+// active set follows the UTC clock (see currentDeepSeekPeriod). Failures
+// fall back to the last synced cache, then to the hardcoded KNOWN_MODELS
+// below.
+interface PriceCache {
+	fetchedAt: number;
+	prices: Record<string, KnownModelDef["cost"]>;
+}
+
+// Parse the pricing table from the official docs page (Docusaurus SSR HTML).
+// Row order is fixed: CACHE HIT (off-peak, peak), CACHE MISS (off-peak, peak),
+// OUTPUT (off-peak, peak), each with one $ value per model. Both periods are
+// kept so the extension can switch rates at the peak/off-peak boundary.
+// Returns null when the page no longer matches the expected shape, so callers
+// fall back to cache/hardcoded.
+function parseOfficialPricingHtml(page: string): Record<string, PeriodCosts> | null {
+	const modelMatch = page.match(
+		/>MODEL<\/td><td>(deepseek-[a-z0-9-]+)<\/td><td>(deepseek-[a-z0-9-]+)<\/td><td>(deepseek-[a-z0-9-]+)<\/td>/,
+	);
+	if (!modelMatch) return null;
+	const ids = modelMatch.slice(1);
+	const start = page.indexOf("PRICING");
+	const end = page.indexOf("Concurrency Limit");
+	if (start === -1 || end === -1 || end <= start) return null;
+	const dollars = page.slice(start, end).match(/\$([0-9.]+)/g);
+	if (!dollars || dollars.length !== 18) return null;
+	const nums = dollars.map((d) => parseFloat(d.slice(1)));
+	// Layout: [cacheHit offPeak×3, cacheHit peak×3, cacheMiss offPeak×3, cacheMiss peak×3, output offPeak×3, output peak×3]
+	const prices: Record<string, PeriodCosts> = {};
+	for (let i = 0; i < ids.length; i++) {
+		prices[ids[i]] = {
+			offPeak: {
+				input: nums[i + 6], // cache-miss off-peak
+				output: nums[i + 12], // output off-peak
+				cacheRead: nums[i], // cache-hit off-peak
+				cacheWrite: 0,
+			},
+			peak: {
+				input: nums[i + 9], // cache-miss peak
+				output: nums[i + 15], // output peak
+				cacheRead: nums[i + 3], // cache-hit peak
+				cacheWrite: 0,
+			},
+		};
+	}
+	return prices;
+}
+
+async function fetchOfficialPrices(): Promise<Record<string, PeriodCosts> | null> {
+	const ctrl = new AbortController();
+	const t = setTimeout(() => ctrl.abort(), 10000);
+	try {
+		const res = await fetch(PRICING_URL, { signal: ctrl.signal });
+		if (!res.ok) return null;
+		return parseOfficialPricingHtml(await res.text());
+	} catch {
+		return null;
+	} finally {
+		clearTimeout(t);
+	}
+}
+
+async function loadSyncedPrices(): Promise<Record<string, PeriodCosts>> {
+	const live = await fetchOfficialPrices();
+	const cache = readJSON<PriceCache | null>(PRICES_CACHE_PATH, null);
+	if (live) {
+		writeJSON(PRICES_CACHE_PATH, { fetchedAt: Date.now(), prices: live });
+		return live;
+	}
+	if (cache?.prices && Object.keys(cache.prices).length) {
+		console.warn(`[deepseek] official pricing page fetch failed; using cached prices (${cacheAgeMin(cache.fetchedAt)}m old).`);
+		return cache.prices;
+	}
+	console.warn("[deepseek] official pricing page fetch failed; using built-in documented prices.");
+	return {};
+}
+
+let syncedPrices: Record<string, PeriodCosts> = {};
+let activePricePeriod: "peak" | "offPeak" = "offPeak";
+
+// Cost lookup order: live/cached synced price → hardcoded catalog → DEFAULT_COST,
+// always picking the rate set for the current period.
+function modelCost(id: string, period: "peak" | "offPeak"): ModelRates {
+	return syncedPrices[id]?.[period] ?? KNOWN_MODELS.find((m) => m.id === id)?.cost[period] ?? DEFAULT_COST[period];
+}
+
+// ── Balance status line (footer, via ctx.ui.setStatus) ────────────────
+const BALANCE_STATUS_KEY = "deepseek-balance";
+const BALANCE_STATUS_REFRESH_MS = 15 * 60_000;
+let balanceStatusTimer: ReturnType<typeof setInterval> | null = null;
+let statusUI: ExtensionUIContext | null = null;
+
+const CURRENCY_SYMBOLS: Record<string, string> = { CNY: "¥", USD: "$" };
+
+// Compact single-line rendering for the footer, e.g. "DS ¥12.34" or "DS $2.05".
+function formatBalanceStatus(b: BalanceResponse): string {
+	const parts = (b.balance_infos ?? []).map((info) => {
+		const sym = CURRENCY_SYMBOLS[info.currency];
+		return sym ? `${sym}${info.total_balance}` : `${info.total_balance} ${info.currency}`;
+	});
+	if (!parts.length) return "DS balance n/a";
+	return `DS ${parts.join("/")}`;
+}
+
+// Refresh the footer status line. Clears it when there is no key, the feature
+// is disabled, or the fetch fails (stale numbers are worse than none).
+async function updateBalanceStatus(): Promise<void> {
+	if (!statusUI) return;
+	const key = readKey();
+	if (loadConfig().showBalanceInStatus === false || !key) {
+		statusUI.setStatus(BALANCE_STATUS_KEY, undefined);
+		return;
+	}
+	const balance = await fetchBalance(key, (loadConfig().baseUrl || BASE_URL).replace(/\/$/, ""));
+	if (!balance || !balance.is_available) {
+		statusUI.setStatus(BALANCE_STATUS_KEY, undefined);
+		return;
+	}
+	statusUI.setStatus(BALANCE_STATUS_KEY, formatBalanceStatus(balance));
+}
+
+function startBalanceStatusTimer(tick: () => void): void {
+	if (balanceStatusTimer) return;
+	balanceStatusTimer = setInterval(tick, BALANCE_STATUS_REFRESH_MS);
+}
+
+function stopBalanceStatusTimer(): void {
+	if (balanceStatusTimer) {
+		clearInterval(balanceStatusTimer);
+		balanceStatusTimer = null;
+	}
+}
+
+// ── Peak/off-peak boundary scheduler ─────────────────────────────────
+// Fires exactly at each transition (weekdays 01:00/04:00/06:00/10:00 UTC),
+// re-registering the provider when the period actually changed. Re-arms from
+// `now` after firing, so sleep/drift self-corrects; the longest gap between
+// boundaries is Fri 10:00 UTC → Mon 01:00 UTC (63h), well under setTimeout's
+// 24.8-day overflow cap.
+let priceBoundaryTimer: ReturnType<typeof setTimeout> | null = null;
+
+function nextBoundaryTime(from: Date): Date {
+	const boundaryHours = [1, 4, 6, 10]; // UTC, weekdays only
+	for (let dayOffset = 0; dayOffset < 8; dayOffset++) {
+		const d = new Date(from.getTime() + dayOffset * 86400_000);
+		const day = d.getUTCDay();
+		if (day === 0 || day === 6) continue; // weekend has no boundaries
+		for (const h of boundaryHours) {
+			const t = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), h, 0, 0, 0);
+			if (t > from.getTime()) return new Date(t);
+		}
+	}
+	// Unreachable (a weekday boundary always exists within 8 days); defensive.
+	return new Date(from.getTime() + 7 * 86400_000);
+}
+
+function startPriceBoundaryScheduler(onBoundary: () => void): void {
+	if (priceBoundaryTimer) return;
+	const arm = (): void => {
+		const now = new Date();
+		const delay = Math.max(0, nextBoundaryTime(now).getTime() - now.getTime());
+		priceBoundaryTimer = setTimeout(() => {
+			priceBoundaryTimer = null;
+			onBoundary(); // the period check inside avoids redundant re-registration
+			arm();
+		}, delay);
+	};
+	arm();
+}
+
+function stopPriceBoundaryScheduler(): void {
+	if (priceBoundaryTimer) {
+		clearTimeout(priceBoundaryTimer);
+		priceBoundaryTimer = null;
+	}
+}
+
 // ── Model definition builder ──────────────────────────────────────────
 function prettyName(id: string): string {
 	return id
@@ -265,7 +484,7 @@ function prettyName(id: string): string {
 		.replace(/\b([a-z])/g, (s) => s.toUpperCase());
 }
 
-function buildModels(ids: string[], format: ApiFormat, cfg: DeepSeekConfig): ProviderModelConfig[] {
+function buildModels(ids: string[], format: ApiFormat, cfg: DeepSeekConfig, period: "peak" | "offPeak"): ProviderModelConfig[] {
 	const overrides = cfg.contextWindowOverrides ?? {};
 	const openaiBase = (cfg.baseUrl || BASE_URL).replace(/\/$/, "");
 	const anthropicBase = (cfg.anthropicBaseUrl || ANTHROPIC_BASE_URL).replace(/\/$/, "");
@@ -287,7 +506,7 @@ function buildModels(ids: string[], format: ApiFormat, cfg: DeepSeekConfig): Pro
 			name: known?.name ?? prettyName(id),
 			reasoning: true, // 官方文档：思考模式默认打开，三个模型均支持
 			input: known?.vision ? (["text", "image"] as ("text" | "image")[]) : (["text"] as ("text" | "image")[]),
-			cost: known?.cost ?? DEFAULT_COST,
+			cost: modelCost(id, period),
 			contextWindow: typeof ctx === "number" && ctx > 0 ? ctx : CONTEXT_WINDOW,
 			maxTokens: MAX_OUTPUT_TOKENS,
 			api: format,
@@ -851,15 +1070,27 @@ export default async function (pi: ExtensionAPI) {
 		const format: ApiFormat = cfg.apiFormat ?? "openai-completions";
 		const openaiBase = (cfg.baseUrl || BASE_URL).replace(/\/$/, "");
 		const anthropicBase = (cfg.anthropicBaseUrl || ANTHROPIC_BASE_URL).replace(/\/$/, "");
+		// Pick the rate set for the current period; re-registering mid-session on a
+		// period change swaps the active model's cost (agent-session refreshes the
+		// current model from the registry after registerProvider).
+		activePricePeriod = currentDeepSeekPeriod();
 		pi.registerProvider("deepseek", {
 			name: "DeepSeek",
 			baseUrl: format === "anthropic-messages" ? anthropicBase : openaiBase,
 			apiKey: "$DEEPSEEK_API_KEY",
 			api: format,
 			authHeader: true,
-			models: buildModels(modelIds, format, cfg),
+			models: buildModels(modelIds, format, cfg, activePricePeriod),
 			streamSimple: format === "anthropic-messages" ? streamDeepSeekAnthropic : undefined,
 		});
+	};
+
+	// Re-register when the peak/off-peak boundary crossed. Scheduled to fire
+	// exactly at each boundary (see startPriceBoundaryScheduler); the period
+	// check here also covers sleep/drift — a late fire still converges.
+	const refreshPricePeriod = (): void => {
+		if (currentDeepSeekPeriod() === activePricePeriod) return;
+		registerProvider();
 	};
 
 	// ── Live catalog fetch (before provider registration) ──────────────
@@ -870,10 +1101,13 @@ export default async function (pi: ExtensionAPI) {
 		(cfg0.baseUrl || BASE_URL).replace(/\/$/, ""),
 		cfg0.showVisionModel !== false,
 	);
+	// ── Price sync: once per extension load (startup and /reload) ──────
+	syncedPrices = await loadSyncedPrices();
 	registerProvider();
-
-	// ── Lazy refresh on session start ──────────────────────────────────
-	pi.on("session_start", async () => {
+	// Fire exactly at each peak/off-peak boundary (weekdays 01:00/04:00/06:00/10:00 UTC).
+	startPriceBoundaryScheduler(() => refreshPricePeriod());
+	// ── Lazy refresh on session start + balance status line ─────────────
+	pi.on("session_start", async (_event, ctx) => {
 		try {
 			const currentKey = readKey();
 			const c = loadConfig();
@@ -884,10 +1118,23 @@ export default async function (pi: ExtensionAPI) {
 				c.showVisionModel !== false,
 			);
 			registerProvider();
+			startPriceBoundaryScheduler(() => refreshPricePeriod()); // no-op when already running
 		} catch (e: unknown) {
 			const msg = e instanceof Error ? e.message : String(e);
 			console.warn(`[deepseek] session_start catalog refresh failed (${msg}); keeping previously loaded models.`);
 		}
+		// Footer status line: show the account balance, refreshed on a timer.
+		statusUI = ctx.ui;
+		void updateBalanceStatus();
+		startBalanceStatusTimer(() => { void updateBalanceStatus(); });
+	});
+
+	// ── Stop the timers when the session shuts down ─────────────────────
+	pi.on("session_shutdown", () => {
+		stopBalanceStatusTimer();
+		stopPriceBoundaryScheduler();
+		statusUI?.setStatus(BALANCE_STATUS_KEY, undefined);
+		statusUI = null;
 	});
 
 	// ── Tool: balance query (GET /user/balance) ────────────────────────
@@ -941,6 +1188,7 @@ export default async function (pi: ExtensionAPI) {
 				"Refresh model list",
 				"API Format",
 				"Balance",
+				"Balance in status bar — toggle",
 				"Re-login",
 				"Base URL — override",
 				"Vision model — toggle",
@@ -965,6 +1213,8 @@ export default async function (pi: ExtensionAPI) {
 						`Anthro: ${(c.anthropicBaseUrl || ANTHROPIC_BASE_URL).replace(/\/$/, "")}`,
 						`Models: ${modelIds.length} (${state})`,
 						`Vision: ${c.showVisionModel === false ? "hidden" : "on (deepseek-v4-flash-vision-exp)"}`,
+						`Price:  ${Object.keys(syncedPrices).length} models synced from official pricing page (${activePricePeriod === "offPeak" ? "off-peak" : "peak"} now) / built-in fallback`,
+						`Status: ${c.showBalanceInStatus === false ? "balance line off" : "balance line on (refresh 15m)"}`,
 					].join("\n"),
 					"info",
 				);
@@ -1019,6 +1269,20 @@ export default async function (pi: ExtensionAPI) {
 					balance ? formatBalance(balance) : "GET /user/balance failed — check the API key and network.",
 					balance ? "info" : "error",
 				);
+				// Also refresh the footer status line right away.
+				statusUI = ctx.ui;
+				void updateBalanceStatus();
+				return;
+			}
+
+			if (choice === "Balance in status bar — toggle") {
+				const next = c.showBalanceInStatus === false;
+				c.showBalanceInStatus = next;
+				saveConfig(c);
+				statusUI = ctx.ui;
+				if (next) void updateBalanceStatus();
+				else ctx.ui.setStatus(BALANCE_STATUS_KEY, undefined);
+				ctx.ui.notify(`Balance in status bar: ${next ? "on" : "off"}`, "info");
 				return;
 			}
 
@@ -1110,15 +1374,17 @@ export default async function (pi: ExtensionAPI) {
 				if (
 					!(await ctx.ui.confirm(
 						"Reset all DeepSeek settings?",
-						"Wipes deepseek-config.json, the models cache, and the deepseek entry in auth.json.",
+						"Wipes deepseek-config.json, the models/prices caches, and the deepseek entry in auth.json.",
 					))
 				)
 					return;
-				for (const p of [CONFIG_PATH, MODELS_CACHE_PATH]) {
+				for (const p of [CONFIG_PATH, MODELS_CACHE_PATH, PRICES_CACHE_PATH]) {
 					try {
 						fs.unlinkSync(p);
 					} catch {}
 				}
+				syncedPrices = {};
+				statusUI?.setStatus(BALANCE_STATUS_KEY, undefined);
 				const a = readAuth();
 				delete a.deepseek;
 				writeAuth(a);

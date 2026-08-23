@@ -9,13 +9,14 @@ This extension is a **fork and extension of [pi-alibaba-models](https://www.npmj
 ## Features
 
 - **Alibaba providers**: subscription-based Model Studio Coding Plan **and** pay-per-token Alibaba Cloud (DashScope) — registered side by side, switch per chat from the model picker.
-- **DeepSeek official provider**: `deepseek-v4-flash` / `deepseek-v4-pro` / `deepseek-v4-flash-vision-exp` against `api.deepseek.com` in three switchable API modes (`/deepseek → API Format`), with `GET /models` dynamic catalog, `GET /user/balance` (command + `deepseek_balance` tool) and vision input on the exp model.
+- **DeepSeek official provider**: `deepseek-v4-flash` / `deepseek-v4-pro` / `deepseek-v4-flash-vision-exp` against `api.deepseek.com` in three switchable API modes (`/deepseek → API Format`), with `GET /models` dynamic catalog, `GET /user/balance` (command + `deepseek_balance` tool), vision input on the exp model, and a **footer balance line** (`DS ¥12.34`).
 - **Three API Shapes** (Alibaba): Anthropic-compatible (`/v1/messages`) by default; OpenAI-compatible Chat Completions (`/compatible-mode/v1`) auto-selected for DeepSeek on the Anthropic format; the new OpenAI **Responses** API (`/compatible-mode/v1/responses`) selectable per-Cloud via `/alibaba` (DeepSeek-V4 included, Beijing/Singapore).
 - **Dual Provider Support** (Alibaba): Both the subscription-based Model Studio Coding Plan **and** the pay-per-token Alibaba Cloud (DashScope) — registered side by side, switch per chat from the model picker.
 - **Five Regions**: International (`dashscope-intl.aliyuncs.com`), China (`dashscope.aliyuncs.com`), US-Virginia (`dashscope-us.aliyuncs.com`), Japan-Tokyo and Germany-Frankfurt (workspace domains), plus Alibaba's recommended **business-space (workspace) domains** for Beijing/Singapore — switch with `/alibaba`, no re-login needed.
 - **Native Reasoning**: First-class thinking-level support for every reasoning-capable model, including `reasoning_effort` levels (Qwen 3.8 Max: low/medium/xhigh; DeepSeek V4, GLM 5.x: high/max) on the OpenAI path.
 - **Vision Capable**: Image input automatically enabled for VL models, Qwen 3.8 Max, and Qwen 3.x Plus variants.
 - **Live Catalog**: Pulls the real `/v1/models` from DashScope on every login + the canonical Qwen-Code plan template. New models appear as Alibaba ships them — no extension update needed. The Cloud catalog now uses Alibaba's native `GET /api/v1/models` (real context windows, max output tokens, Reasoning/VU capability tags, input modality and **pricing** — no more id-based guessing where available), falling back to the compatible-mode endpoint on domains that don't expose it.
+- **Footer status lines**: DeepSeek shows your account balance in the footer (`DS ¥12.34`, refreshed on a timer — toggle with `/deepseek → Balance in status bar`); Alibaba Cloud shows the active model's rate-limit quota when the limits endpoint is reachable (Beijing workspace domain).
 ## How to Use (Quickstart)
 
 1. **Install** the extension (see below).
@@ -124,7 +125,7 @@ The login flow validates the prefix and offers to redirect you to the correct pr
 
 ### Rate limits
 
-`/alibaba → Rate limits (Cloud)` queries `GET /api/v1/models/limits` with your API key and prints each model's quota: request rate (req/s or req/min), token usage limit per period, and async queue/concurrency where applicable. It's a read-only best-effort view — the endpoint is currently only documented on the **Beijing workspace domain**, so on other domains it tells you to switch (`/alibaba → Cloud — Change Domain`) and retry. The view is filtered to the models in your current Cloud catalog so it stays focused.
+`/alibaba → Rate limits (Cloud)` queries `GET /api/v1/models/limits` with your API key and prints each model's quota: request rate (req/s or req/min), token usage limit per period, and async queue/concurrency where applicable. It's a read-only best-effort view — the endpoint is currently only documented on the **Beijing workspace domain**, so on other domains it tells you to switch (`/alibaba → Cloud — Change Domain`) and retry. The view is filtered to the models in your current Cloud catalog so it stays focused. When the active model is an `alibaba-cloud` model, its rate limit is also shown in the footer (`Ali qwen3.7-max 60 req/min`, refreshed on a 15-minute timer; toggle with `/alibaba → Status in footer`).
 
 ### Authorized-models filter
 
@@ -160,6 +161,7 @@ The Cloud provider mirrors the live catalog from Alibaba's native `GET /api/v1/m
 | Cloud — Change Domain        | International / China / US / Japan / Frankfurt / workspace domains / Custom |
 | Cloud — Change API Format    | Anthropic Messages / OpenAI Chat Completions / OpenAI Responses          |
 | Rate limits (Cloud)          | Show per-model rate/usage quotas for the current API key (`/api/v1/models/limits`) |
+| Status in footer — toggle    | Show/hide the active Cloud model's rate-limit quota in the footer                |
 | Cloud — Authorized-only Filter | Toggle hiding catalog models the account isn't authorized to call (`/api/v1/models/permissions`) |
 | Context Window — Override    | Set the context-window shown on a model's card (per model, or `*` for all) |
 | Reset all                    | Wipe all Alibaba state (config, both auth entries, plan-models cache)    |
@@ -182,6 +184,7 @@ The Cloud provider mirrors the live catalog from Alibaba's native `GET /api/v1/m
 | `~/.pi/agent/alibaba-cloud-models.cache.json`         | 4 h cloud-models cache             |
 | `~/.pi/agent/deepseek-config.json`                    | DeepSeek API format / base URL config |
 | `~/.pi/agent/deepseek-models.cache.json`              | DeepSeek `GET /models` cache       |
+| `~/.pi/agent/deepseek-prices.cache.json`              | Last-synced official pricing (both peak/off-peak rate sets) |
 ## DeepSeek official API provider (`/deepseek`)
 
 Since v1.1.0 the package also ships a **DeepSeek official API** extension
@@ -201,7 +204,15 @@ full capability surface:
 - **Dynamic model list** — `GET /models` at startup and on `/deepseek → Refresh model list`,
   with an offline cache fallback (`~/.pi/agent/deepseek-models.cache.json`).
 - **Balance query** — `GET /user/balance` via `/deepseek → Balance` or the `deepseek_balance` tool
-  (`is_available` + per-currency total/granted/topped-up balances, CNY/USD).
+	  (`is_available` + per-currency total/granted/topped-up balances, CNY/USD), plus a **footer
+	  balance line** (`DS ¥12.34`) refreshed on a 15-minute timer (`/deepseek → Balance in status bar — toggle`).
+- **Price sync** — model costs are parsed from the official pricing page
+	  ([api-docs.deepseek.com/quick_start/pricing](https://api-docs.deepseek.com/quick_start/pricing))
+	  once per extension load, caching both **peak and off-peak** USD rates
+	  (`~/.pi/agent/deepseek-prices.cache.json`). The active rate set follows the
+	  UTC clock (peak = weekdays 01:00-04:00 + 06:00-10:00 UTC, exactly 2× off-peak),
+	  re-registering the provider at each boundary so the footer `$` cost stays
+	  accurate. Offline, the last-synced cache (then a built-in table) is used.
 - **Image understanding** — `deepseek-v4-flash-vision-exp` (JPEG/PNG/GIF/WebP) is included
   with `input: ["text", "image"]`; toggle it via `/deepseek → Vision model`.
 - **Model catalog** — deepseek-v4-flash, deepseek-v4-pro, deepseek-v4-flash-vision-exp
@@ -224,10 +235,11 @@ full capability surface:
 
 | Menu item                | Action                                                            |
 |--------------------------|-------------------------------------------------------------------|
-| Status                   | Auth state, API format, base URLs, model count, cache age         |
+| Status                   | Auth state, API format, base URLs, model count, cache age, price sync state, current peak/off-peak period |
 | Refresh model list       | Force `GET /models` and re-register the provider                  |
 | API Format               | Switch `openai-completions` / `anthropic-messages` / `openai-responses` |
-| Balance                  | `GET /user/balance` (is_available + CNY/USD totals)               |
+| Balance                  | `GET /user/balance` (is_available + CNY/USD totals), then refreshes the footer line |
+| Balance in status bar — toggle | Show/hide the account balance in the footer            |
 | Re-login                 | Wipe the `deepseek` auth entry and re-run `/login`                |
 | Base URL — override      | Custom OpenAI/Anthropic base URLs (proxies/gateways)              |
 | Vision model — toggle    | Show/hide `deepseek-v4-flash-vision-exp`                          |

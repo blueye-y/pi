@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import type { ExtensionAPI, ExtensionCommandContext, ProviderModelConfig } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionCommandContext, ExtensionUIContext, ProviderModelConfig } from "@earendil-works/pi-coding-agent";
 
 // ── Paths ─────────────────────────────────────────────────────────────
 const HOME_DIR = path.join(os.homedir(), ".pi", "agent");
@@ -42,6 +42,10 @@ interface AlibabaConfig {
 	// account is authorized to call (GET /api/v1/models/permissions) whenever
 	// that endpoint is reachable. Set to false to always show the full catalog.
 	cloudAuthorizedOnly?: boolean;
+	// Show the active Cloud model's rate-limit quota in the footer status line.
+	// Best-effort: only available when the limits endpoint is reachable (Beijing
+	// workspace domain) and the active model is from alibaba-cloud. Default: true.
+	showStatusInFooter?: boolean;
 }
 
 const readJSON = <T>(p: string, fallback: T): T => {
@@ -595,6 +599,52 @@ function formatQuota(q: CloudQuotaInfo): string {
 	return s;
 }
 
+// ── Footer status line (via ctx.ui.setStatus) ─────────────────────────
+// Shows the active alibaba-cloud model's rate-limit quota, e.g.
+// "Ali qwen3.7-max 60 req/min". Best-effort: cleared when the limits
+// endpoint is unreachable, the active model is not from alibaba-cloud,
+// there is no key, or the feature is disabled.
+const ALIBABA_STATUS_KEY = "alibaba-status";
+const ALIBABA_STATUS_REFRESH_MS = 15 * 60_000;
+let alibabaStatusTimer: ReturnType<typeof setInterval> | null = null;
+let alibabaStatusUI: ExtensionUIContext | null = null;
+let activeCloudModelId: string | null = null;
+
+function formatQuotaStatus(info: CloudQuotaInfo): string {
+	const l = info.modelLimit;
+	const rate = l.request_limit_period === 1 ? "req/s" : `req/${l.request_limit_period ?? 60}s`;
+	return `Ali ${info.model} ${l.request_limit ?? 0} ${rate}`;
+}
+
+async function updateAlibabaStatus(): Promise<void> {
+	if (!alibabaStatusUI) return;
+	const cfg = loadConfig();
+	const key = readCloudKey();
+	if (cfg.showStatusInFooter === false || !key || !activeCloudModelId) {
+		alibabaStatusUI.setStatus(ALIBABA_STATUS_KEY, undefined);
+		return;
+	}
+	const quotas = await fetchCloudQuotas(cfg.cloudDomain || DEFAULT_CLOUD_DOMAIN, key);
+	const q = quotas?.get(activeCloudModelId);
+	if (!q) {
+		alibabaStatusUI.setStatus(ALIBABA_STATUS_KEY, undefined);
+		return;
+	}
+	alibabaStatusUI.setStatus(ALIBABA_STATUS_KEY, formatQuotaStatus(q));
+}
+
+function startAlibabaStatusTimer(): void {
+	if (alibabaStatusTimer) return;
+	alibabaStatusTimer = setInterval(() => { void updateAlibabaStatus(); }, ALIBABA_STATUS_REFRESH_MS);
+}
+
+function stopAlibabaStatusTimer(): void {
+	if (alibabaStatusTimer) {
+		clearInterval(alibabaStatusTimer);
+		alibabaStatusTimer = null;
+	}
+}
+
 function buildCloudModels(models: ProviderModelConfig[], domain: string, fmt: CloudApiFormat): ProviderModelConfig[] {
 	return models.map((m) => {
 		// DeepSeek on the Anthropic-compat path tends to hang → keep it on chat
@@ -903,7 +953,7 @@ export default async function (pi: ExtensionAPI) {
 	});
 
 	// ── Lazy refresh: fetch live catalogs and re-register ───────────────
-	pi.on("session_start", async () => {
+	pi.on("session_start", async (_event, ctx) => {
 		try {
 			const planCred = readAuth()["alibaba-plan"];
 			planDefs = await loadPlanDefs(false, planCred);
@@ -991,6 +1041,24 @@ export default async function (pi: ExtensionAPI) {
 				`[alibaba] session_start catalog refresh failed (${e?.message || e}); keeping previously loaded models.`,
 			);
 		}
+		// Footer status line: active Cloud model's rate-limit quota.
+		alibabaStatusUI = ctx.ui;
+		activeCloudModelId = ctx.model?.provider === "alibaba-cloud" ? ctx.model.id : null;
+		void updateAlibabaStatus();
+		startAlibabaStatusTimer();
+	});
+
+	// ── Track the active model so the footer quota follows model switches ──
+	pi.on("model_select", (event) => {
+		activeCloudModelId = event.model.provider === "alibaba-cloud" ? event.model.id : null;
+		void updateAlibabaStatus();
+	});
+
+	// ── Stop the footer refresh timer when the session shuts down ────────
+	pi.on("session_shutdown", () => {
+		stopAlibabaStatusTimer();
+		alibabaStatusUI?.setStatus(ALIBABA_STATUS_KEY, undefined);
+		alibabaStatusUI = null;
 	});
 
 	// ── Command: /alibaba ──────────────────────────────────────────────
@@ -1006,6 +1074,7 @@ export default async function (pi: ExtensionAPI) {
 				"Cloud — Change Domain",
 				"Cloud — Change API Format",
 				"Rate limits (Cloud)",
+				"Status in footer — toggle",
 				"Cloud — Authorized-only Filter",
 				"Context Window — Override",
 				"Reset all",
@@ -1048,6 +1117,7 @@ export default async function (pi: ExtensionAPI) {
 					`       Format:    ${cfg.cloudApiFormat || "anthropic-messages"}`,
 					`       Auth-only: ${cfg.cloudAuthorizedOnly === false ? "off" : "on (when endpoint available)"}${cloudCache?.authorizedOnly ? " — active (filtered list)" : ""}`,
 					`       Models:    ${cloudDefs.length} (${cloudState})`,
+					`Footer:  ${cfg.showStatusInFooter === false ? "quota line off" : "quota line on (refresh 15m)"}`,
 				];
 				const overrides = cfg.contextWindowOverrides;
 				if (overrides && Object.keys(overrides).length) {
@@ -1224,6 +1294,20 @@ export default async function (pi: ExtensionAPI) {
 				if (entries.length > MAX_SHOWN) lines.push(`  … and ${entries.length - MAX_SHOWN} more`);
 				if (!entries.length) lines.push("  (no quotas for the current model list)");
 				ctx.ui.notify(lines.join("\n"), "info");
+				// Also refresh the footer quota line right away.
+				alibabaStatusUI = ctx.ui;
+				void updateAlibabaStatus();
+				return;
+			}
+
+			if (choice === "Status in footer — toggle") {
+				const next = cfg.showStatusInFooter === false;
+				cfg.showStatusInFooter = next;
+				saveConfig(cfg);
+				alibabaStatusUI = ctx.ui;
+				if (next) void updateAlibabaStatus();
+				else ctx.ui.setStatus(ALIBABA_STATUS_KEY, undefined);
+				ctx.ui.notify(`Cloud quota in footer: ${next ? "on" : "off"}`, "info");
 				return;
 			}
 
@@ -1308,6 +1392,8 @@ export default async function (pi: ExtensionAPI) {
 						fs.unlinkSync(p);
 					} catch {}
 				}
+				// Clear the footer status line (no credentials left to query).
+				alibabaStatusUI?.setStatus(ALIBABA_STATUS_KEY, undefined);
 				// Strip the auth entries directly from auth.json.
 				const a = readAuth();
 				for (const k of [
