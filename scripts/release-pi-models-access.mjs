@@ -8,8 +8,7 @@
  * npm workspace packages, and this directory is not a workspace member.
  *
  * Usage:
- *   node scripts/release-pi-models-access.mjs <major|minor|patch|x.y.z> [--dry-run] [--commit]
- *
+ *   node scripts/release-pi-models-access.mjs <major|minor|patch|x.y.z> [--dry-run] [--commit] [--no-publish]
  * Steps:
  * 1. Check for uncommitted changes
  * 2. Compute the new version and verify it is not already published on npm
@@ -20,10 +19,12 @@
  * 6. Add a fresh [Unreleased] section for the next cycle
  * 7. Install dependencies if needed, then build (tsc) inside the package dir
  * 8. Validate the tarball with npm pack --dry-run
- * 9. Publish with npm publish
+ * 9. Publish with npm publish (skipped with --no-publish)
  * 10. With --commit: commit the version/changelog changes and tag
  *    pi-models-access@<version>. Push the tag manually to trigger the
- *    publish-pi-models-access GitHub Actions workflow.
+ *    publish-pi-models-access GitHub Actions workflow (OIDC trusted
+ *    publishing — no OTP needed). Use --no-publish --commit to let the
+ *    workflow be the only publisher.
  */
 
 import { execSync, spawnSync } from "node:child_process";
@@ -35,6 +36,7 @@ const args = process.argv.slice(2);
 const RELEASE_TARGET = args.find((a) => !a.startsWith("--"));
 const DRY_RUN = args.includes("--dry-run");
 const COMMIT = args.includes("--commit");
+const NO_PUBLISH = args.includes("--no-publish");
 const BUMP_TYPES = new Set(["major", "minor", "patch"]);
 const SEMVER_RE = /^\d+\.\d+\.\d+$/;
 
@@ -44,10 +46,14 @@ const PACKAGE_JSON = join(PACKAGE_DIR, "package.json");
 const CHANGELOG = join(PACKAGE_DIR, "CHANGELOG.md");
 
 if (!RELEASE_TARGET || (!BUMP_TYPES.has(RELEASE_TARGET) && !SEMVER_RE.test(RELEASE_TARGET))) {
-	console.error("Usage: node scripts/release-pi-models-access.mjs <major|minor|patch|x.y.z> [--dry-run] [--commit]");
+	console.error("Usage: node scripts/release-pi-models-access.mjs <major|minor|patch|x.y.z> [--dry-run] [--commit] [--no-publish]");
 	process.exit(1);
 }
 
+if (NO_PUBLISH && !COMMIT && !DRY_RUN) {
+	console.error("Error: --no-publish requires --commit (otherwise the version is bumped but nothing is published anywhere).");
+	process.exit(1);
+}
 function run(cmd, options = {}) {
 	console.log(`$ ${cmd}`);
 	try {
@@ -175,10 +181,15 @@ console.log("Validating tarball...");
 run("npm pack --dry-run", { cwd: PACKAGE_DIR });
 console.log();
 
-// 8. Publish
-console.log("Publishing...");
-run("npm publish", { cwd: PACKAGE_DIR });
-console.log();
+// 8. Publish (skipped with --no-publish: the workflow is the publisher)
+if (NO_PUBLISH) {
+	console.log("Skipping npm publish (--no-publish) — the publish-pi-models-access workflow will publish after the tag is pushed.");
+	console.log();
+} else {
+	console.log("Publishing...");
+	run("npm publish", { cwd: PACKAGE_DIR });
+	console.log();
+}
 
 // 9. Commit and tag
 if (COMMIT) {
@@ -187,7 +198,13 @@ if (COMMIT) {
 	run(`git commit -m "chore(models-access): release v${version}"`);
 	run(`git tag pi-models-access@${version}`);
 	console.log(`  Tagged pi-models-access@${version}`);
-	console.log("  Push the tag to trigger the publish-pi-models-access workflow:");
+	if (NO_PUBLISH) {
+		console.log(`  Tagged pi-models-access@${version} (no local publish — the workflow is the publisher).`);
+		console.log("  Push the tag to trigger the publish-pi-models-access workflow (OIDC trusted publishing):");
+	} else {
+		console.log(`  Tagged pi-models-access@${version}`);
+		console.log("  Push the tag to trigger the publish-pi-models-access workflow (will fail to re-publish; the version is already on npm):");
+	}
 	console.log(`  git push <remote> ${gitBranch()} --tags`);
 }
 
@@ -195,4 +212,8 @@ function gitBranch() {
 	return run("git branch --show-current", { silent: true }).trim();
 }
 
-console.log(`\n=== ${pkg.name} v${version} released ===`);
+if (NO_PUBLISH) {
+	console.log(`\n=== ${pkg.name} v${version} tagged (not published) — push the tag to let the workflow publish ===`);
+} else {
+	console.log(`\n=== ${pkg.name} v${version} released ===`);
+}
