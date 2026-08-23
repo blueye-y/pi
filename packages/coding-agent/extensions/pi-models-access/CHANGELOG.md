@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [1.1.3] - 2026-08-23
+
 - **Fresher footer balance** (`/deepseek`): the balance line now also refreshes after each
   completed conversation round (`agent_settled` — once per user message, after the last turn
   and once no retry/compaction is pending), so the footer number tracks actual spend
