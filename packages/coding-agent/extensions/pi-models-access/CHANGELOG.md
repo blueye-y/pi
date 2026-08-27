@@ -2,6 +2,7 @@
 
 ## [Unreleased]
 
+- **DeepSeek footer balance follows the active model** (`extensions/deepseek.ts`): the `DS ¥12.34` status line now shows **only while the current model is a DeepSeek model** — switching to another provider (e.g. Zhipu GLM) hides it immediately and it comes back on switch-back, matching the Alibaba footer quota line. Also guards against a stale in-flight balance fetch overwriting the footer after a model switch.
 ## [1.2.0] - 2026-08-27
 
 - **Zhipu GLM providers** (`extensions/zhipu.ts`, `/zhipu`): overrides pi's built-in `zai-coding-cn` (智谱开放平台, `open.bigmodel.cn`) and `zai` (Z.AI international, `api.z.ai`) providers so the built-in `/login → Z.AI Coding CN / Z.AI` flow keeps working unchanged (the `auth.json` entries and `$ZAI_CODING_CN_API_KEY` / `$ZAI_API_KEY` env vars are inherited from the built-ins, same as DeepSeek reuses pi's default login). Adds:

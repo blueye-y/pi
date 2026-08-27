@@ -194,11 +194,10 @@ const writeAuth = (a: Record<string, AuthEntry>) => writeJSON(AUTH_PATH, a);
 // Key resolution: auth.json["deepseek"] (saved by /login → "Use an API key")
 // or the $DEEPSEEK_API_KEY env var (also the provider-level apiKey reference).
 function readKey(): string | null {
-	try {
-		const cred = readAuth().deepseek;
-		const k = cred?.key || cred?.access;
-		if (k) return k;
-	} catch {}
+	// readAuth never throws (readJSON falls back to {}), so no try/catch needed.
+	const cred = readAuth().deepseek;
+	const k = cred?.key || cred?.access;
+	if (k) return k;
 	return process.env.DEEPSEEK_API_KEY || null;
 }
 
@@ -410,7 +409,10 @@ const BALANCE_STATUS_KEY = "deepseek-balance";
 const BALANCE_STATUS_REFRESH_MS = 15 * 60_000;
 let balanceStatusTimer: ReturnType<typeof setInterval> | null = null;
 let statusUI: ExtensionUIContext | null = null;
-
+/** Whether the active session model is a DeepSeek model (footer visibility). */
+let activeDeepseekModel = false;
+/** Monotonic guard so a stale in-flight balance fetch never overwrites the footer. */
+let balanceStatusSeq = 0;
 const CURRENCY_SYMBOLS: Record<string, string> = { CNY: "¥", USD: "$" };
 
 // Compact single-line rendering for the footer, e.g. "DS ¥12.34" or "DS $2.05".
@@ -423,17 +425,27 @@ function formatBalanceStatus(b: BalanceResponse): string {
 	return `DS ${parts.join("/")}`;
 }
 
-// Refresh the footer status line. Clears it when there is no key, the feature
-// is disabled, or the fetch fails (stale numbers are worse than none).
+// Refresh the footer status line. Clears it when the active model is not a
+// DeepSeek model (same behavior as the Alibaba footer quota line), when there
+// is no key, the feature is disabled, or the fetch fails (stale numbers are
+// worse than none).
 async function updateBalanceStatus(): Promise<void> {
 	if (!statusUI) return;
+	const seq = ++balanceStatusSeq;
+	if (!activeDeepseekModel) {
+		statusUI.setStatus(BALANCE_STATUS_KEY, undefined);
+		return;
+	}
 	const key = readKey();
 	if (loadConfig().showBalanceInStatus === false || !key) {
 		statusUI.setStatus(BALANCE_STATUS_KEY, undefined);
 		return;
 	}
 	const balance = await fetchBalance(key, (loadConfig().baseUrl || BASE_URL).replace(/\/$/, ""));
-	if (!balance || !balance.is_available) {
+	// A newer request (model switch, agent round, timer tick) superseded this
+	// one — drop it so stale data never overwrites the footer.
+	if (seq !== balanceStatusSeq) return;
+	if (!activeDeepseekModel || !balance || !balance.is_available) {
 		statusUI.setStatus(BALANCE_STATUS_KEY, undefined);
 		return;
 	}
@@ -652,7 +664,9 @@ async function* iterateSSE(
 					try {
 						const parsed = JSON.parse(data) as Record<string, unknown>;
 						yield { type: eventType, ...parsed } as AnthropicStreamEvent;
-					} catch {}
+					} catch {
+						// Not a JSON SSE frame — skip it and keep parsing.
+					}
 				}
 				idx = buffer.indexOf("\n\n");
 			}
@@ -669,7 +683,9 @@ async function* iterateSSE(
 			if (data) {
 				try {
 					yield JSON.parse(data) as AnthropicStreamEvent;
-				} catch {}
+				} catch {
+					// Not a JSON SSE frame — skip it and keep parsing.
+				}
 			}
 		}
 	} finally {
@@ -702,7 +718,9 @@ function parseAnthropicError(body: string, status: number): string {
 		};
 		const msg = json.error?.message;
 		if (msg) return `DeepSeek API error ${status}: ${msg}`;
-	} catch {}
+	} catch {
+		// Non-JSON error body (or no error.message) — fall through to the raw snippet.
+	}
 	return `DeepSeek API error ${status}: ${body.slice(0, 300)}`;
 }
 
@@ -1150,7 +1168,9 @@ export default async function (pi: ExtensionAPI) {
 			const msg = e instanceof Error ? e.message : String(e);
 			console.warn(`[deepseek] session_start catalog refresh failed (${msg}); keeping previously loaded models.`);
 		}
-		// Footer status line: show the account balance, refreshed on a timer.
+		// Footer status line: show the account balance only while the active
+		// model is a DeepSeek model, refreshed on a timer.
+		activeDeepseekModel = ctx.model?.provider === "deepseek";
 		statusUI = ctx.ui;
 		void updateBalanceStatus();
 		startBalanceStatusTimer(() => {
@@ -1163,6 +1183,12 @@ export default async function (pi: ExtensionAPI) {
 	// retry/compaction is pending — so this is one balance GET per user message,
 	// not one per internal tool-loop turn. The 15-minute timer stays as a fallback
 	// for idle time (e.g. top-ups while the session is just sitting there).
+	// ── Track model switches: hide the balance line off DeepSeek models ────
+	pi.on("model_select", (event) => {
+		activeDeepseekModel = event.model.provider === "deepseek";
+		void updateBalanceStatus();
+	});
+
 	pi.on("agent_settled", () => {
 		void updateBalanceStatus();
 	});
@@ -1419,7 +1445,9 @@ export default async function (pi: ExtensionAPI) {
 				for (const p of [CONFIG_PATH, MODELS_CACHE_PATH, PRICES_CACHE_PATH]) {
 					try {
 						fs.unlinkSync(p);
-					} catch {}
+					} catch {
+						// File already gone — nothing to clean up.
+					}
 				}
 				syncedPrices = {};
 				statusUI?.setStatus(BALANCE_STATUS_KEY, undefined);
