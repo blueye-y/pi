@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-08-27
+
 - **Zhipu GLM providers** (`extensions/zhipu.ts`, `/zhipu`): overrides pi's built-in `zai-coding-cn` (智谱开放平台, `open.bigmodel.cn`) and `zai` (Z.AI international, `api.z.ai`) providers so the built-in `/login → Z.AI Coding CN / Z.AI` flow keeps working unchanged (the `auth.json` entries and `$ZAI_CODING_CN_API_KEY` / `$ZAI_API_KEY` env vars are inherited from the built-ins, same as DeepSeek reuses pi's default login). Adds:
   - **Live model specs**: context window / max output / vision / thinking parsed from the official docs pages (`docs.bigmodel.cn` serves every model page as markdown; discovery through the model-overview index) — 7-day cache (`~/.pi/agent/zhipu-specs.cache.json`), synced specs override the built-in catalog, refreshed on startup (logged in only) and via `/zhipu → Refresh model lists`. Prices stay on the documented table.
   - **Two billing modes**, switchable via `/zhipu → Mode`: **Coding Plan** (subscription quota, `https://open.bigmodel.cn/api/coding/paas/v4`) or **API** (pay-per-token, `https://open.bigmodel.cn/api/paas/v4`); intl variants on `api.z.ai`. Both use the OpenAI Chat Completions shape (thinking format `zai`, `zaiToolStream`, `max_tokens`) — the same shape as the built-ins, so no custom streaming is needed.
