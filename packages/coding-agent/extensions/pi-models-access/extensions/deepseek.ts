@@ -39,7 +39,12 @@ import {
 	type ToolResultMessage,
 	type UserMessage,
 } from "@earendil-works/pi-ai";
-import type { ExtensionAPI, ExtensionCommandContext, ExtensionUIContext, ProviderModelConfig } from "@earendil-works/pi-coding-agent";
+import type {
+	ExtensionAPI,
+	ExtensionCommandContext,
+	ExtensionUIContext,
+	ProviderModelConfig,
+} from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 
 // ── Paths ─────────────────────────────────────────────────────────────
@@ -235,20 +240,33 @@ async function loadModelIds(
 	baseUrl: string,
 	showVision: boolean,
 ): Promise<string[]> {
+	// Not logged in: never touch the network at startup (no /models request, no
+	// warn). Return the cached model list merged with the built-in catalog only.
+	if (!apiKey) {
+		const cache = readJSON<ModelsCache | null>(MODELS_CACHE_PATH, null);
+		const ids = new Set<string>(cache?.ids?.length ? cache.ids : []);
+		for (const m of KNOWN_MODELS) {
+			if (m.vision && !showVision) continue;
+			ids.add(m.id);
+		}
+		return [...ids];
+	}
 	let live: string[] | null = null;
 	if (apiKey) live = await fetchModelIds(apiKey, baseUrl);
 	const cache = readJSON<ModelsCache | null>(MODELS_CACHE_PATH, null);
 	if (live) {
 		writeJSON(MODELS_CACHE_PATH, { fetchedAt: Date.now(), ids: live });
 	} else if (!cache?.ids?.length) {
-		console.warn(`[deepseek] /models fetch failed${apiKey ? "" : " (no API key)"}; using the built-in catalog.`);
+		console.warn(`[deepseek] /models fetch failed; using the built-in catalog.`);
 	} else {
 		console.warn(
 			`[deepseek] /models fetch failed; using cached models (${cache.ids.length}, ${cacheAgeMin(cache.fetchedAt)}m old).`,
 		);
 	}
-
-	const ids = new Set<string>(cache?.ids?.length ? cache.ids : []);
+	// Live ids win over the (pre-write) cache so brand-new models appear on the
+	// very first successful fetch instead of waiting for the next load.
+	const merged = live ?? cache?.ids ?? [];
+	const ids = new Set<string>(merged.length ? merged : []);
 	for (const m of KNOWN_MODELS) {
 		if (m.vision && !showVision) continue;
 		ids.add(m.id);
@@ -369,7 +387,9 @@ async function loadSyncedPrices(): Promise<Record<string, PeriodCosts>> {
 		return live;
 	}
 	if (cache?.prices && Object.keys(cache.prices).length) {
-		console.warn(`[deepseek] official pricing page fetch failed; using cached prices (${cacheAgeMin(cache.fetchedAt)}m old).`);
+		console.warn(
+			`[deepseek] official pricing page fetch failed; using cached prices (${cacheAgeMin(cache.fetchedAt)}m old).`,
+		);
 		return cache.prices;
 	}
 	console.warn("[deepseek] official pricing page fetch failed; using built-in documented prices.");
@@ -484,7 +504,12 @@ function prettyName(id: string): string {
 		.replace(/\b([a-z])/g, (s) => s.toUpperCase());
 }
 
-function buildModels(ids: string[], format: ApiFormat, cfg: DeepSeekConfig, period: "peak" | "offPeak"): ProviderModelConfig[] {
+function buildModels(
+	ids: string[],
+	format: ApiFormat,
+	cfg: DeepSeekConfig,
+	period: "peak" | "offPeak",
+): ProviderModelConfig[] {
 	const overrides = cfg.contextWindowOverrides ?? {};
 	const openaiBase = (cfg.baseUrl || BASE_URL).replace(/\/$/, "");
 	const anthropicBase = (cfg.anthropicBaseUrl || ANTHROPIC_BASE_URL).replace(/\/$/, "");
@@ -1095,14 +1120,16 @@ export default async function (pi: ExtensionAPI) {
 
 	// ── Live catalog fetch (before provider registration) ──────────────
 	const cfg0 = loadConfig();
+	const startupKey = readKey();
 	modelIds = await loadModelIds(
 		true,
-		readKey(),
+		startupKey,
 		(cfg0.baseUrl || BASE_URL).replace(/\/$/, ""),
 		cfg0.showVisionModel !== false,
 	);
-	// ── Price sync: once per extension load (startup and /reload) ──────
-	syncedPrices = await loadSyncedPrices();
+	// ── Price sync: once per extension load (startup and /reload), only when ──
+	// logged in — not logged in means no startup network requests at all.
+	if (startupKey) syncedPrices = await loadSyncedPrices();
 	registerProvider();
 	// Fire exactly at each peak/off-peak boundary (weekdays 01:00/04:00/06:00/10:00 UTC).
 	startPriceBoundaryScheduler(() => refreshPricePeriod());
@@ -1126,7 +1153,9 @@ export default async function (pi: ExtensionAPI) {
 		// Footer status line: show the account balance, refreshed on a timer.
 		statusUI = ctx.ui;
 		void updateBalanceStatus();
-		startBalanceStatusTimer(() => { void updateBalanceStatus(); });
+		startBalanceStatusTimer(() => {
+			void updateBalanceStatus();
+		});
 	});
 
 	// ── Refresh the footer balance after each completed conversation round ─

@@ -1,7 +1,12 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import type { ExtensionAPI, ExtensionCommandContext, ExtensionUIContext, ProviderModelConfig } from "@earendil-works/pi-coding-agent";
+import type {
+	ExtensionAPI,
+	ExtensionCommandContext,
+	ExtensionUIContext,
+	ProviderModelConfig,
+} from "@earendil-works/pi-coding-agent";
 
 // ── Paths ─────────────────────────────────────────────────────────────
 const HOME_DIR = path.join(os.homedir(), ".pi", "agent");
@@ -635,7 +640,9 @@ async function updateAlibabaStatus(): Promise<void> {
 
 function startAlibabaStatusTimer(): void {
 	if (alibabaStatusTimer) return;
-	alibabaStatusTimer = setInterval(() => { void updateAlibabaStatus(); }, ALIBABA_STATUS_REFRESH_MS);
+	alibabaStatusTimer = setInterval(() => {
+		void updateAlibabaStatus();
+	}, ALIBABA_STATUS_REFRESH_MS);
 }
 
 function stopAlibabaStatusTimer(): void {

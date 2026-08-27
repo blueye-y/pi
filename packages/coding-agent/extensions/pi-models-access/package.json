@@ -49,7 +49,8 @@
   "pi": {
     "extensions": [
       "extensions/alibaba.ts",
-      "extensions/deepseek.ts"
+      "extensions/deepseek.ts",
+      "extensions/zhipu.ts"
     ],
     "image": "https://raw.githubusercontent.com/blueye-y/pi-models-access/main/banner.jpg"
   },

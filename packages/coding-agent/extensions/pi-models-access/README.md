@@ -1,6 +1,6 @@
 # pi-models-access
 
-The complete [`pi`](https://github.com/badlogic/pi-mono) extension set for Alibaba's model lineup — **Qwen 3.8 Max**, **Qwen 3.7 Max / Plus / Flash**, **Qwen 3.6 Plus / Flash**, **DeepSeek V4 Pro / Flash**, **Kimi K2.6 / K2.7**, **GLM-5.1 / 5.2**, **MiniMax M2.5**, and the rest of the catalog — **plus the official DeepSeek API provider** (Completions / Anthropic / Responses API modes, dynamic model list, balance query, image understanding). Native thinking-level support, both Anthropic- and OpenAI-shaped APIs (including the new OpenAI **Responses** API), International / China / US / Japan / Frankfurt endpoints, both Coding Plan subscriptions and pay-per-token Cloud keys.
+The complete [`pi`](https://github.com/badlogic/pi-mono) extension set for Alibaba's model lineup — **Qwen 3.8 Max**, **Qwen 3.7 Max / Plus / Flash**, **Qwen 3.6 Plus / Flash**, **DeepSeek V4 Pro / Flash**, **Kimi K2.6 / K2.7**, **GLM-5.1 / 5.2**, **MiniMax M2.5**, and the rest of the catalog — **plus the official DeepSeek API provider** (Completions / Anthropic / Responses API modes, dynamic model list, balance query, image understanding) **and the Zhipu GLM provider** (智谱 Coding Plan + API, dynamic model list, documented pricing). Native thinking-level support, both Anthropic- and OpenAI-shaped APIs (including the new OpenAI **Responses** API), International / China / US / Japan / Frankfurt endpoints, both Coding Plan subscriptions and pay-per-token Cloud keys.
 
 ## Origin
 
@@ -9,7 +9,8 @@ This extension is a **fork and extension of [pi-alibaba-models](https://www.npmj
 ## Features
 
 - **Alibaba providers**: subscription-based Model Studio Coding Plan **and** pay-per-token Alibaba Cloud (DashScope) — registered side by side, switch per chat from the model picker.
-- **DeepSeek official provider**: `deepseek-v4-flash` / `deepseek-v4-pro` / `deepseek-v4-flash-vision-exp` against `api.deepseek.com` in three switchable API modes (`/deepseek → API Format`), with `GET /models` dynamic catalog, `GET /user/balance` (command + `deepseek_balance` tool), vision input on the exp model, and a **footer balance line** (`DS ¥12.34`).
+- **DeepSeek official provider**: `deepseek-v4-flash` / `deepseek-v4-pro` / `deepseek-v4-flash-vision-exp` against `api.deepseek.com` in three switchable API modes (`/deepseek → API Format`), with `GET /models` dynamic catalog, `GET /user/balance` (command + `deepseek_balance` tool), vision input on the exp model, and a **footer balance line** (`DS ¥12.34`). When no key is present the provider makes **zero startup requests** (no `/models`, no pricing-page sync).
+- **Zhipu GLM provider**: overrides pi's built-in `zai-coding-cn` (智谱开放平台) and `zai` (Z.AI intl) providers, reusing their `/login` flow. Both **Coding Plan** (subscription quota) and **API** (pay-per-token) billing modes (`/zhipu → Mode`), `GET /models` dynamic catalog, documented CNY/USD pricing, and capability defaults (vision, context window, thinking) filled per model — GLM-5.3 included with its always-on thinking.
 - **Three API Shapes** (Alibaba): Anthropic-compatible (`/v1/messages`) by default; OpenAI-compatible Chat Completions (`/compatible-mode/v1`) auto-selected for DeepSeek on the Anthropic format; the new OpenAI **Responses** API (`/compatible-mode/v1/responses`) selectable per-Cloud via `/alibaba` (DeepSeek-V4 included, Beijing/Singapore).
 - **Dual Provider Support** (Alibaba): Both the subscription-based Model Studio Coding Plan **and** the pay-per-token Alibaba Cloud (DashScope) — registered side by side, switch per chat from the model picker.
 - **Five Regions**: International (`dashscope-intl.aliyuncs.com`), China (`dashscope.aliyuncs.com`), US-Virginia (`dashscope-us.aliyuncs.com`), Japan-Tokyo and Germany-Frankfurt (workspace domains), plus Alibaba's recommended **business-space (workspace) domains** for Beijing/Singapore — switch with `/alibaba`, no re-login needed.
@@ -254,6 +255,65 @@ full capability surface:
 > - `deepseek_balance` is a custom tool the LLM can call on its own.
 > - Context caching (KV cache) is automatic server-side per the docs — cache-hit tokens
 >   are surfaced in usage as `cacheRead`.
+
+## Zhipu GLM provider (`/zhipu`)
+
+The package also ships a **Zhipu (智谱) GLM** extension (`extensions/zhipu.ts`) that
+overrides pi's built-in `zai-coding-cn` (智谱开放平台, `open.bigmodel.cn`) and `zai`
+(Z.AI international, `api.z.ai`) providers, so the built-in `/login` flow keeps
+working unchanged — the `auth.json` entries and `$ZAI_CODING_CN_API_KEY` /
+`$ZAI_API_KEY` env vars are inherited from the built-ins (same trick the DeepSeek
+extension uses to reuse pi's default DeepSeek login).
+
+- **Two billing modes**, switchable via `/zhipu → Mode`:
+  - **Coding Plan** (subscription quota, default): `https://open.bigmodel.cn/api/coding/paas/v4`
+  - **API** (pay-per-token): `https://open.bigmodel.cn/api/paas/v4`
+  - intl equivalents on `api.z.ai`. Both use the OpenAI Chat Completions shape
+    (thinking format `zai`, `zaiToolStream`, `max_tokens`) — the same shape as the
+    built-ins, so no custom streaming is needed.
+- **Dynamic model list** — `GET /models` at startup and on `/zhipu → Refresh model lists`,
+  with an offline cache fallback (`~/.pi/agent/zhipu-models.cache.json`) and the
+  built-in catalog as last resort.
+- **Live model specs** — context window, max output, vision and thinking are parsed
+  from the official docs pages (`docs.bigmodel.cn` serves every model page as
+  markdown; discovery goes through the model-overview index), cached for 7 days
+  (`~/.pi/agent/zhipu-specs.cache.json`) and refreshed via `/zhipu → Refresh model
+  lists`. Synced specs override the built-in catalog, so spec changes land without
+  an extension update. Only runs when logged in.
+- **Documented pricing** — CNY per 1M tokens (USD for intl): GLM-5.3/5.2
+  ¥8 in / ¥28 out / ¥2 cache hit, GLM-5 ¥4 / ¥18 / ¥1, GLM-5.3-Flash
+  ¥0.8 / ¥2.8 / ¥0.23. Unknown ids fall back to default rates. (智谱's pricing page
+  is a JS-rendered console page with no public static source, so prices come from
+  the documented table rather than a live page parse.)
+- **Capability defaults** filled per model id — context window, max output, vision and
+  thinking: GLM-5.3 is 1M ctx with thinking **always on** (its `off` thinking level is
+  hidden because the API rejects `thinking.type: disabled`); GLM-5.3-Flash / 5V / 4.6V /
+  4.1V models are flagged vision-capable; flash/free models can be hidden via
+  `showFlash` in `zhipu-config.json`.
+
+### Quickstart
+
+1. `pi install pi-models-access` (or run from a checkout) and restart `pi`.
+2. `/login → Use an API key → Z.AI Coding CN` (China) or `Z.AI` (intl) and paste your
+   Coding Plan token or API key from the 智谱 console — or export
+   `ZAI_CODING_CN_API_KEY` / `ZAI_API_KEY`.
+3. Open the model picker and pick e.g. `GLM-5.3`.
+4. `/zhipu → Mode` to switch between Coding Plan and API billing.
+
+### `/zhipu` command reference
+
+| Menu item                | Action                                                            |
+|--------------------------|-------------------------------------------------------------------|
+| Status                   | Mode, flash toggle, spec-sync state, per-region auth, base URL, model count, cache age |
+| Refresh model lists      | Force `GET /models` for both regions and re-register the providers |
+| Mode — Coding Plan / API | Switch the billing endpoint                                        |
+| Re-login                 | Wipe the `zai`/`zai-coding-cn` auth entries and re-run `/login`    |
+| Base URL — override      | Custom OpenAI-compatible base URL per region (proxies/gateways)    |
+| Context Window — override| Per-model (or `*`) context-window override                         |
+| Reset all                | Wipe config, models cache and auth entries                         |
+
+> **Note** — there is no account-balance/quota command for Zhipu: the platform has no
+> documented API-key balance endpoint (the console balance page is session-authenticated).
 
 ## From the same author
 By [Francesco Frapporti](https://fornace.it) at [Fornace](https://fornace.it).
