@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [1.2.1] - 2026-08-27
+
 - **DeepSeek footer balance follows the active model** (`extensions/deepseek.ts`): the `DS ¥12.34` status line now shows **only while the current model is a DeepSeek model** — switching to another provider (e.g. Zhipu GLM) hides it immediately and it comes back on switch-back, matching the Alibaba footer quota line. Also guards against a stale in-flight balance fetch overwriting the footer after a model switch.
 ## [1.2.0] - 2026-08-27
 
